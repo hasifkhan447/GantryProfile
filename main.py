@@ -1,4 +1,5 @@
 import pygame
+import math
 # Pixel speed into real speed? How do we convert this?
 # I will determine my mapping so that 1m: 100
 
@@ -47,25 +48,6 @@ class Structure():
         pygame.draw.rect(screen, color, pygame.Rect(x,         y,         t, h))  # left
         pygame.draw.rect(screen, color, pygame.Rect(x + w - t, y,         t, h))  # right
 
-class EndEffector:
-    def __init__(self, x_m, y_m):
-        self.x_m = x_m
-        self.y_m = y_m 
-        self.vx_m = 0
-        self.vy_m = 0
-
-    def update(self, dt, target_x_m, target_y_m):
-        dt_s = dt / 1000.0
-
-        k = 2.0
-
-        self.vx = k * (target_x_m - self.x_m)
-        self.vy = k * (target_y_m - self.y_m) 
-
-        self.x_m += self.vx * dt_s 
-        self.y_m += self.vy * dt_s
-    def draw(self, screen):
-        pygame.draw.circle(screen, (100,0,0), (m2px(self.x_m), m2px(self.y_m)), 5)
 
 
 
@@ -108,6 +90,11 @@ class Object():
         font = pygame.font.SysFont(None, 16)
         label = font.render(self.name, True, (200, 200, 200))
         screen.blit(label, (int(draw_x) + 2, int(draw_y) + int(self.y_len_px) // 2 - 8))
+
+
+
+
+
 
 
 
@@ -169,6 +156,49 @@ class Line():
         label = font.render(f"Belt: {self.speed_real} m/s", True, (220, 255, 220))
         screen.blit(label, (8, self.pos_y_px + self.height_px/2 + 4))
 
+class EndEffector:
+    def __init__(self, x_m, y_m):
+        self.x_m = x_m
+        self.y_m = y_m 
+        self.vx_m = 0
+        self.vy_m = 0
+        self.objects: list[Object] = []
+
+    def update(self, dt, target_x_m, target_y_m):
+        dt_s = dt / 1000.0
+
+        k = 2.0
+
+        self.vx = k * (target_x_m - self.x_m)
+        self.vy = k * (target_y_m - self.y_m) 
+
+        self.x_m += self.vx * dt_s 
+        self.y_m += self.vy * dt_s
+
+    def add(self, obj: Object): # Start_x is in m 
+        self.objects.append(obj)
+
+
+    def pick(self, obj: Object, line: Line):
+        if (obj in line.objects):
+            line.remove(obj)
+        self.add(obj)
+
+    def place(self, obj: Object, reciever : Line | None = None): 
+        if reciever == None: 
+            obj.pos_x_real = self.x_m
+            obj.pos_y_real = self.y_m 
+        else: 
+            self.objects.remove(obj)
+            reciever.add(obj, start_x_m = self.x_m)
+
+
+
+    def draw(self, screen):
+        pygame.draw.circle(screen, (100,0,0), (m2px(self.x_m), m2px(self.y_m)), 5)
+        for obj in self.objects:
+            obj.draw(screen)
+
 
 
 def main(): 
@@ -208,15 +238,19 @@ def main():
 
         screen.fill("purple")
 
+        ee.update(dt, microwave.pos_x_real, microwave.pos_y_real)
+
+
+        if math.sqrt((ee.x_m - microwave.pos_x_real)**2 + (ee.y_m - microwave.pos_y_real)**2) < 1e-3:
+            ee.pick(microwave, line)
+
 
         line.draw(screen)
         gantry.draw(screen)
         tape_closing.draw(screen)
 
-        ee.update(dt, microwave.pos_x_real, microwave.pos_y_real)
 
         ee.draw(screen)
-
         line.update(dt)
 
 
