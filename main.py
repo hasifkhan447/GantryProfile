@@ -152,38 +152,59 @@ class EndEffector(Obj):
         self.struct = bound_structure
         self.held_objects: List[PhysicsObject] = []
         
-        # PI Control
-        self.error_sum = np.array([[0.0], [0.0]])
-        self.last_target = np.array([[0.0], [0.0]])
-        self.kp = 5.0
-        self.ki = 1.5
+        # Kinematic State for S-Curve
+        self.vel = np.array([[0.0], [0.0]])
+        self.accel = np.array([[0.0], [0.0]])
+        
+        # S-Curve Constraints
+        self.max_v = 0.5   # m/s (Your requested clamp)
+        self.max_a = 3   # m/s^2
+        self.gain_p = 20.0 # How aggressively to snap to target
 
     def update(self, dt: int, target_vec: np.ndarray):
         dt_s = dt / 1000.0
         if dt_s <= 0: return
 
-        # AUTO-RESET: If target vector has changed significantly, clear integral memory
-        if not np.allclose(target_vec, self.last_target, atol=1e-4):
-            self.error_sum = np.array([[0.0], [0.0]])
-            self.last_target = target_vec.copy()
-
-        # CLAMP: Keep target within Gantry bounds
+        # 1. CLAMP: Keep target within Gantry bounds
         half_limit = self.struct.size_real / 2
         low_limit = self.struct.pos - half_limit
         high_limit = self.struct.pos + half_limit
         clamped_target = np.clip(target_vec, low_limit, high_limit)
 
-        # PI Calculation
+        # 2. S-CURVE LOGIC (Simplified via PD-like acceleration control)
+        # Calculate desired velocity based on distance to target
         error = clamped_target - self.pos
-        self.error_sum += error * dt_s
+        desired_vel = error * self.gain_p
         
-        velocity = (self.kp * error) + (self.ki * self.error_sum)
-        self.pos = self.pos + (velocity * dt_s)
+        # Clamp desired velocity to max_v
+        vel_mag = np.linalg.norm(desired_vel)
+        if vel_mag > self.max_v:
+            desired_vel = (desired_vel / vel_mag) * self.max_v
+
+        # Calculate required acceleration to reach desired velocity
+        # This acts as the 'Jerk' limiter effectively
+        accel_needed = (desired_vel - self.vel) / 0.1  # 0.1 is a smoothing factor
+        
+        # Clamp acceleration
+        acc_mag = np.linalg.norm(accel_needed)
+        if acc_mag > self.max_a:
+            accel_needed = (accel_needed / acc_mag) * self.max_a
+
+        # 3. INTEGRATE
+        self.vel += accel_needed * dt_s
+        
+        # Final safety velocity clamp
+        final_vel_mag = np.linalg.norm(self.vel)
+        if final_vel_mag > self.max_v:
+            self.vel = (self.vel / final_vel_mag) * self.max_v
+
+        self.pos = self.pos + (self.vel * dt_s)
+
         # Sync held objects
         for obj in self.held_objects:
             obj.pos = self.pos.copy()
 
-
+    # ... keep pick/place/draw methods the same ...
 
     def pick(self, obj: PhysicsObject, line: 'Line'):
         if obj in line.objects:
@@ -232,8 +253,7 @@ class Line:
 
 
 
-        self.objects = [o for o in self.objects if m2px(o.x) < dim + 100]
-
+        self.objects = [o for o in self.objects if o.x < px2m(dim + 100) and o.x > -5.0]
     def draw(self, screen):
         py = m2px(self.pos_y)
         ph = m2px(self.height)
@@ -254,14 +274,30 @@ def main():
 
 
     ee = EndEffector(4.0, 4.0, gantry)
+    line_speed = 0.1 # m/s
+    spacing_distance = 0.8 # meters between sets
+
+    # Calculate spawn_rate in ms
+    spawn_rate = (spacing_distance / line_speed) * 1000 
+
+    # Spawner State Machine variables
+    spawn_state = "SPAWN_MW"
+    spawn_timer = 0
+
+
+
+
+
+
     
     
-    line = Line(pos_y=4.0, height=1.0)
+    
+    line = Line(pos_y=4.0, height=1.0, speed=line_speed)
 
     state = "IDLE"
     running = True
 
-    home_pos = np.array([[4.0],[4.0]])
+    home_pos = np.array([[2.5],[4.0]])
 
     palletized = []
 
@@ -269,16 +305,11 @@ def main():
     current_tc: Optional[PhysicsObject] = None 
     current_pk: Optional[PhysicsObject] = None 
 
-    spawn_rate = 8000
-    spawn_timer = spawn_rate - 1
-
     logger = KinematicsLogger()
-
-
-
-
+    time_scale = 10.0  # 2.0 = 2x speed, 5.0 = 5x speed, etc.
     while running:
-        dt = clock.tick(60)
+        real_dt = clock.tick(60)
+        sim_dt  = time_scale*real_dt
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT: 
@@ -287,105 +318,137 @@ def main():
                 logger.plot_data()
 
 
-        spawn_timer += dt
-        if spawn_timer > spawn_rate:
-            line.add(PhysicsObject(0.67, 0.58, 40, name="MW"), 0.0)
-            line.add(PhysicsObject(0.67, 0.58, 1, name="Box"), -0.8)
-            line.add(PhysicsObject(0.67, 0.58, 1, name="TC"), -1.6)
-            spawn_timer = 0
+        spawn_timer += sim_dt
+        if spawn_state == "SPAWN_MW":
+                    line.add(PhysicsObject(0.67, 0.58, 40, name="MW"), 0.0)
+                    spawn_state = "WAIT_FOR_BOX"
+                    spawn_timer = 0
 
+        elif spawn_state == "WAIT_FOR_BOX":
+            if spawn_timer >= spawn_rate:
+                line.add(PhysicsObject(0.67, 0.58, 1, name="Box"), 0.0)
+                spawn_state = "WAIT_FOR_TC"
+                spawn_timer = 0
 
+        elif spawn_state == "WAIT_FOR_TC":
+            if spawn_timer >= spawn_rate:
+                line.add(PhysicsObject(0.67, 0.58, 1, name="TC"), 0.0)
+                spawn_state = "WAIT_FOR_NEXT_SET"
+                spawn_timer = 0
+
+        elif spawn_state == "WAIT_FOR_NEXT_SET":
+            if spawn_timer >= spawn_rate:
+                spawn_state = "SPAWN_MW"
+                spawn_timer = 0
 
         # Current Target defaults to EE current pos if no state is active
         target = ee.pos.copy()
-        targetable_microwaves = [o for o in line.objects if o.name == "MW" and gantry.contains(o.pos)]
-        for microwave in targetable_microwaves:
-            if microwave.status == "NONE":
-                microwave.status = "PACKAGING"
 
-            elif microwave.status == "PACKAGING" and tape_machine.contains(microwave.pos):
-                microwave.status = "TAPING"
+# --- 1. PRE-LOGIC: TARGETING FILTERS ---
+        all_boxes = [o for o in line.objects if o.name == "Box" and gantry.contains(o.pos)]
+        
+        # IMPORTANT: Logic to advance box status so ready_to_palletize actually fills up
+        for b in all_boxes:
+            # If box has 2 items (MW + TC) but status is still NONE, it's packed
+            if len(b.children) == 2 and b.status == "NONE":
+                b.status = "PACKED"
+            # If it's packed and hits the tape machine, it's ready
+            if b.status == "PACKED" and tape_machine.contains(b.pos):
+                b.status = "TAPING"
 
-            elif microwave.status == "TAPING" and not tape_machine.contains(microwave.pos):
-                microwave.status = "READY"
+            if b.status == "TAPING" and not tape_machine.contains(b.pos):
+                b.status = "READY"
 
+        mws_on_belt = [o for o in line.objects if o.name == "MW" and gantry.contains(o.pos) and o.status == "NONE"]
+        tcs_on_belt = [o for o in line.objects if o.name == "TC" and gantry.contains(o.pos) and o.status == "NONE"]
+        
+        empty_boxes = [b for b in all_boxes if len(b.children) == 0]
+        boxes_needing_tc = [b for b in all_boxes if len(b.children) == 1]
+        # Only palletize if it's READY and within the Gantry reach
+        ready_to_palletize = [b for b in all_boxes if b.status == "READY" and gantry.contains(b.pos)]
 
-
-        # State Machine Logic
+        # --- 2. THE STATE MACHINE ---
         if state == "IDLE":
-            target=home_pos
-            candidates = [o for o in line.objects if o.name == "MW" and gantry.contains(o.pos)]
-            if candidates:
-                current_mw = candidates[0]
-                state = "PICK_MW"
+            target = home_pos
+            
+            # HIGHEST PRIORITY: Clear the line of finished goods
+            if ready_to_palletize:
+                state = "PALLET_PICK"
+            
+            # SECOND PRIORITY: Complete partially filled boxes
+            elif boxes_needing_tc and tcs_on_belt:
+                current_pkg = boxes_needing_tc[0]
+                state = "TC2PKG_PICK"
+            
+            # THIRD PRIORITY: Start new boxes
+            elif mws_on_belt:
+                state = "MW2PKG_PICK"
 
-        elif state == "PICK_MW":
-            if current_mw != None: 
-                target = current_mw.pos
-                if ee.is_close(current_mw):
-                    ee.pick(current_mw, line); state = "PLACE_MW"
+        # --- PALLET SEQUENCE (TOP PRIORITY) ---
+        elif state == "PALLET_PICK":
+            # Re-verify the list isn't empty to prevent index errors
+            if not ready_to_palletize:
+                state = "IDLE"
+            else:
+                current_pkg = ready_to_palletize[0]
+                target = current_pkg.pos
+                if ee.is_close(current_pkg):
+                    ee.pick(current_pkg, line)
+                    state = "PALLET_PLACE"
 
-        elif state == "PLACE_MW":
-            pk_candidates = [o for o in line.objects if o.name == "Box" and gantry.contains(o.pos)]
-            if pk_candidates:
-                current_pk = pk_candidates[0]
-                target = current_pk.pos
-                if ee.is_close(current_pk) and current_mw != None:
-                    ee.place_inside(current_mw,current_pk); state = "PICK_TC"
+        elif state == "PALLET_PLACE":
+            target = pallet.pos
+            if ee.is_close(pallet) and current_pkg is not None:
+                obj = ee.place(current_pkg)
+                if obj: palletized.append(obj)
+                state = "IDLE"
 
-        elif state == "PICK_TC":
-            tc_candidates = [o for o in line.objects if o.name == "TC" and gantry.contains(o.pos)]
-            if tc_candidates:
-                current_tc = tc_candidates[0]
+        # --- MICROWAVE SEQUENCE ---
+        elif state == "MW2PKG_PICK":
+            current_mw = mws_on_belt[0]
+            target = current_mw.pos
+            if ee.is_close(current_mw):
+                ee.pick(current_mw, line)
+                state = "MW2PKG_PLACE"
+
+        elif state == "MW2PKG_PLACE":
+            if not empty_boxes: 
+                target = home_pos # Wait for an empty box to arrive
+            else:
+                current_pkg = empty_boxes[0]
+                target = current_pkg.pos
+                if ee.is_close(current_pkg):
+                    ee.place_inside(current_mw, current_pkg)
+                    state = "IDLE"
+
+        # --- THERMOCOL SEQUENCE ---
+        elif state == "TC2PKG_PICK":
+            if not tcs_on_belt: state = "IDLE"
+            else:
+                current_tc = tcs_on_belt[0]
                 target = current_tc.pos
                 if ee.is_close(current_tc):
-                    ee.pick(current_tc, line); state = "PLACE_current_tc"
-            else: 
-                target = home_pos
+                    ee.pick(current_tc, line)
+                    state = "TC2PKG_PLACE"
 
-
-        elif state == "PLACE_current_tc":
-            if (current_pk != None and current_tc != None): 
-                target = current_pk.pos
-                if ee.is_close(current_pk):
-                    ee.place_inside(current_tc, current_pk); state = "AWAIT_TAPE_IN"
-            # else: 
-            #     state = "IDLE"
-
-        elif state == "AWAIT_TAPE_IN":
-            if (current_pk != None):
-                target = tape_machine.pos - np.array([[0.8], [0.0]])
-                if tape_machine.contains(current_pk.pos): state = "AWAIT_TAPE_OUT"
-
-        elif state == "AWAIT_TAPE_OUT":
-            if (current_pk != None):
-                target = tape_machine.pos + np.array([[0.8], [0.0]])
-                if not tape_machine.contains(current_pk.pos) and gantry.contains(current_pk.pos):
-                    state = "PICK_PACKAGED"
-
-        elif state == "PICK_PACKAGED":
-            if (current_pk != None):
-                target = current_pk.pos
-                if ee.is_close(current_pk):
-                    ee.pick(current_pk, line); state = "PLACE_PACKAGED"
-            else: 
+        elif state == "TC2PKG_PLACE":
+            # We must target the specific box identified in IDLE
+            target = current_pkg.pos
+            if ee.is_close(current_pkg):
+                ee.place_inside(current_tc, current_pkg)
                 state = "IDLE"
 
-        elif state == "PLACE_PACKAGED":
-            if (current_pk != None):
-                target = pallet.pos
-                if pallet.is_close(ee, threshold=0.15):
-                    obj = ee.place(current_pk)
-                    if obj: 
-                        palletized.append(obj)
-                    print("Successfully palletized!")
-                    state = "IDLE"
-            else: 
-                state = "IDLE"
+
+
+
+
+
+
+
 
         # Logic & Physics
-        ee.update(dt, target)
-        line.update(dt)
+        ee.update(sim_dt, target)
+        line.update(sim_dt)
 
         # Rendering
         screen.fill((50, 20, 70))
@@ -402,7 +465,7 @@ def main():
         screen.blit(img, (20, 20))
         pygame.display.flip()
 
-        logger.log(ee.pos, dt)
+        logger.log(ee.pos, sim_dt)
 
 if __name__ == "__main__":
     main()
