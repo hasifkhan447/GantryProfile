@@ -1,359 +1,292 @@
 import pygame
 import math
-# Pixel speed into real speed? How do we convert this?
-# I will determine my mapping so that 1m: 100
+import numpy as np
+from typing import List, Optional
 
-global dim, onem
+# Global Mapping
 dim = 800
-onem = 100 #100px/1m 
-size = dim/onem
+onem = 100  # 100px / 1m
+
+def m2px(m_val): return int(m_val * onem)
+def px2m(px_val): return px_val / onem
+
+class Obj:
+    """Base class for anything with a physical position in the 2D world."""
+    def __init__(self, pos_x: float, pos_y: float, x_len: float, y_len: float):
+        # Position stored as a 2x1 Numpy Vector
+        self._pos = np.array([[float(pos_x)], [float(pos_y)]])
+        self.size_real = np.array([[float(x_len)], [float(y_len)]])
+        self.children: List['PhysicsObject'] = []
+
+    @property 
+    def pos(self):
+        return self._pos 
+
+    @pos.setter 
+    def pos(self, new_pos):
+        self._pos = new_pos 
+        for child in self.children:
+            child.pos = new_pos.copy()
+    
+    @property
+    def x(self): return self._pos[0, 0]
+
+    @property
+    def y(self): return self._pos[1, 0]
+
+    def is_close(self, other: 'Obj', threshold=0.1) -> bool:
+        """Euclidean distance check between two Obj instances."""
+        self.pos 
+        other.pos
+        if np.linalg.norm(self.pos - other.pos) < threshold:
+            return True
+        else: 
+            return False
+
+    def contains(self, other_pos: np.ndarray) -> bool:
+        """Checks if a 2x1 position vector is within this object's rectangular bounds."""
+        half_size = self.size_real / 2
+        low = self.pos - half_size
+        high = self.pos + half_size
+        if np.all((other_pos >= low) & (other_pos <= high)):
+            return True 
+        else: return False
 
 
-def px2m(quantity_px):
-    global onem
-    quantity_m = quantity_px/onem 
-    return quantity_m
-
-def m2px(quantity_px):
-    global onem
-    quantity_m = quantity_px*onem 
-    return quantity_m
-
-
-
-
-
-
-
-
-
-
-
-# This is an object with mass 
-class Object():
-    def __init__(self, x_len_real: float, y_len_real : float, mass, pos_x_real = 0.0, pos_y_real = 0.0, name="MW", rotate=True):
-        self.x_len_real = x_len_real # This is in m 
-        self.y_len_real = y_len_real # This is in m
-
-        if rotate==True:
-            self.x_len_px = m2px(self.y_len_real)
-            self.y_len_px = m2px(self.x_len_real)
-        else:
-            self.x_len_px = m2px(self.x_len_real)
-            self.y_len_px = m2px(self.y_len_real)
-
-
-        self.pos_x_real = pos_x_real
-        self.pos_y_real = pos_y_real
-
-
-        self.mass = mass # This is in m 
-
-        self.name = name
-
-    def pos_x_px(self):
-        return m2px(self.pos_x_real)
-
-    def pos_y_px(self):
-        return m2px(self.pos_y_real)
-
-    def draw(self, screen):
-        draw_x = int(self.pos_x_px() - self.x_len_px/2)
-        draw_y = int(self.pos_y_px() - self.y_len_px/2)
-        rect = pygame.Rect(draw_x, draw_y, int(self.x_len_px), int(self.y_len_px))
-        pygame.draw.rect(screen, (60, 60, 80), rect)
-        font = pygame.font.SysFont(None, 16)
-        label = font.render(self.name, True, (200, 200, 200))
-        screen.blit(label, (int(draw_x) + 2, int(draw_y) + int(self.y_len_px) // 2 - 8))
-
-
-class Structure(): 
-    OUTLINE_THICKNESS_REAL = 0.025  # 2.5cm in meters
-    def __init__(self, x_len_real, y_len_real, pos_x_real, pos_y_real):
-        self.x_len_real = x_len_real
-        self.y_len_real = y_len_real
-        self.x_len_px = m2px(x_len_real) # This is in px
-        self.y_len_px = m2px(y_len_real) # This is in px
-        self.outline_px = m2px(self.OUTLINE_THICKNESS_REAL)
-
-        self.pos_x_real = pos_x_real
-        self.pos_y_real = pos_y_real
-
-
-    def pos_x_px(self):
-        return m2px(self.pos_x_real)
-
-    def pos_y_px(self):
-        return m2px(self.pos_y_real)
+class Structure(Obj):
+    OUTLINE_THICKNESS = 0.025
+    def __init__(self, x_len, y_len, pos_x, pos_y):
+        super().__init__(pos_x, pos_y, x_len, y_len)
 
     def draw(self, screen):
         color = (180, 180, 180)
-        t = self.outline_px
-        x, y, w, h = self.pos_x_px() - self.x_len_px/2, self.pos_y_px() - self.y_len_px/2, self.x_len_px, self.y_len_px
+        t = m2px(self.OUTLINE_THICKNESS)
+        w, h = m2px(self.size_real[0,0]), m2px(self.size_real[1,0])
+        x = m2px(self.x) - w//2
+        y = m2px(self.y) - h//2
+        pygame.draw.rect(screen, color, (x, y, w, h), t)
 
-        # Top, bottom, left, right bars
-        pygame.draw.rect(screen, color, pygame.Rect(x,         y,         w, t))  # top
-        pygame.draw.rect(screen, color, pygame.Rect(x,         y + h - t, w, t))  # bottom
-        pygame.draw.rect(screen, color, pygame.Rect(x,         y,         t, h))  # left
-        pygame.draw.rect(screen, color, pygame.Rect(x + w - t, y,         t, h))  # right
+class PhysicsObject(Obj):
+    def __init__(self, x_len, y_len, mass, pos_x=0.0, pos_y=0.0, name="Item", rotate=True):
+        if rotate:
+            super().__init__(pos_x, pos_y, y_len, x_len)
+        else:
+            super().__init__(pos_x, pos_y, x_len, y_len)
+        self.mass = mass
+        self.name = name
 
-
-    def contains(self, target_x, target_y):
-
-        half_w = self.x_len_real / 2
-        half_h = self.y_len_real / 2
-        # Check if the coordinates are within the left/right and top/bottom bounds
-        return (self.pos_x_real - half_w <= target_x <= self.pos_x_real + half_w and
-                self.pos_y_real - half_h <= target_y <= self.pos_y_real + half_h)
-
-
-
-
-
-class Line():
-    """Assembly line. Owns objects on it and moves them forward each tick."""
-    def __init__(self, pos_y_real=8, height_real=80, speed_real=0.30):
-        self.height_real = height_real
-        self.height_px = m2px(self.height_real)
-
-        self.speed_real = speed_real   # m/s
-        self.speed_px = m2px(self.speed_real)  # px/s
-
-
-
-        self.pos_y_real = pos_y_real
-        self.pos_y_px = m2px(self.pos_y_real)
-
-
-        self.height_real = height_real
-        self.height_px = m2px(self.height_real)
-
-        self.objects: list[Object] = []
-
-        self.stopped = False
-
-    def update(self, dt):
-        if not self.stopped:
-            dt_s = dt / 1000.0
-            for obj in self.objects:
-                obj.pos_x_real += self.speed_real * dt_s
-            # Remove objects that have left the screen
-            self.objects = [o for o in self.objects if o.pos_x_px() < dim + 100]
-
-    def toggle(self):
-        self.stopped = not self.stopped
-
-    def add(self, obj: Object, start_x_m=0.0): # Start_x is in m 
-        obj.pos_x_real = start_x_m
-        obj.pos_y_real = self.pos_y_real
-        self.objects.append(obj)
-
-    def remove(self, obj: Object):
-        self.objects.remove(obj)
- 
     def draw(self, screen):
-        # Belt
-        pygame.draw.rect(screen, (40, 120, 40), pygame.Rect(0, self.pos_y_px - self.height_px/2, dim, self.height_px))
-        for obj in self.objects:
-            obj.draw(screen)
- 
-        # Speed label
-        font = pygame.font.SysFont(None, 20)
-        label = font.render(f"Belt: {self.speed_real} m/s", True, (220, 255, 220))
-        screen.blit(label, (8, self.pos_y_px + self.height_px/2 + 4))
+        w, h = m2px(self.size_real[0,0]), m2px(self.size_real[1,0])
+        x, y = m2px(self.x) - w//2, m2px(self.y) - h//2
+        pygame.draw.rect(screen, (60, 60, 80), (x, y, w, h))
+        label = pygame.font.SysFont(None, 16).render(self.name, True, (200, 200, 200))
+        screen.blit(label, (x + 2, y + h//2 - 8))
 
-class EndEffector:
-    def __init__(self, x_m, y_m, structure):
-        self.x_m = x_m
-        self.y_m = y_m 
-        self.vx_m = 0
-        self.vy_m = 0
-        self.objects: list[Object] = []
-        self.error_sum_x = 0
-        self.error_sum_y = 0
+        for child in self.children:
+            child.draw(screen)
 
-        self.structure = structure;
+class EndEffector(Obj):
+    def __init__(self, pos_x, pos_y, bound_structure: Structure):
+        super().__init__(pos_x, pos_y, 0.1, 0.1)
+        self.struct = bound_structure
+        self.held_objects: List[PhysicsObject] = []
+        
+        # PI Control
+        self.error_sum = np.array([[0.0], [0.0]])
+        self.last_target = np.array([[0.0], [0.0]])
+        self.kp = 5.0
+        self.ki = 1.5
 
-    def update(self, dt, target_x_m, target_y_m):
+    def update(self, dt: int, target_vec: np.ndarray):
         dt_s = dt / 1000.0
         if dt_s <= 0: return
-        if ( not self.structure.contains(target_x_m, target_y_m)): return 
 
+        # AUTO-RESET: If target vector has changed significantly, clear integral memory
+        if not np.allclose(target_vec, self.last_target, atol=1e-4):
+            self.error_sum = np.array([[0.0], [0.0]])
+            self.last_target = target_vec.copy()
 
-        # 1. Calculate current Error
-        error_x = target_x_m - self.x_m
-        error_y = target_y_m - self.y_m
+        # CLAMP: Keep target within Gantry bounds
+        half_limit = self.struct.size_real / 2
+        low_limit = self.struct.pos - half_limit
+        high_limit = self.struct.pos + half_limit
+        clamped_target = np.clip(target_vec, low_limit, high_limit)
 
-        # 2. Update Integral (Accumulated Error)
-        self.error_sum_x += error_x * dt_s
-        self.error_sum_y += error_y * dt_s
-
-        # 3. PI Constants
-        # Kp is the "snap" (Proportional)
-        # Ki is the "force" to close the final gap (Integral)
-        kp = 5.0  
-        ki = 1.5  
-
-        # 4. Calculate Velocity Output
-        self.vx = (kp * error_x) + (ki * self.error_sum_x)
-        self.vy = (kp * error_y) + (ki * self.error_sum_y) 
-
-        # 5. Apply Movement
-        self.x_m += self.vx * dt_s 
-        self.y_m += self.vy * dt_s
-
-        # 6. Update held objects
-        for obj in self.objects:
-            obj.pos_x_real = self.x_m
-            obj.pos_y_real = self.y_m
+        # PI Calculation
+        error = clamped_target - self.pos
+        self.error_sum += error * dt_s
+        
+        velocity = (self.kp * error) + (self.ki * self.error_sum)
+        self.pos = self.pos + (velocity * dt_s)
+        # Sync held objects
+        for obj in self.held_objects:
+            obj.pos = self.pos.copy()
 
 
 
+    def pick(self, obj: PhysicsObject, line: 'Line'):
+        if obj in line.objects:
+            line.objects.remove(obj)
+            self.held_objects.append(obj)
 
-    def add(self, obj: Object): # Start_x is in m 
-        self.objects.append(obj)
+    def place_inside(self, item: PhysicsObject, container: PhysicsObject):
+        if item in self.held_objects:
+            self.held_objects.remove(item)
+            container.children.append(item)
+
+    def place(self, obj: PhysicsObject, receiver: Optional['Line'] = None):
+        if obj in self.held_objects:
+            self.held_objects.remove(obj)
+            if receiver:
+                receiver.add(obj, obj.x)
+            else:
+                # If no receiver, the object stays exactly where it was placed
+                # We return it so the main loop can track it if needed
+                return obj
+            return None
 
 
-    def pick(self, obj: Object, line: Line):
-        if (obj in line.objects):
-            line.remove(obj)
-        self.add(obj)
-
-    def place(self, obj: Object, reciever : Line | None = None): 
-        if reciever == None: 
-            obj.pos_x_real = self.x_m
-            obj.pos_y_real = self.y_m 
-        else: 
-            self.objects.remove(obj)
-            reciever.add(obj, start_x_m = self.x_m)
 
     def draw(self, screen):
+        for obj in self.held_objects: obj.draw(screen)
+        pygame.draw.circle(screen, (100, 0, 0), (m2px(self.x), m2px(self.y)), 5)
+
+class Line:
+    def __init__(self, pos_y, height, speed=0.30):
+        self.pos_y = pos_y
+        self.height = height
+        self.speed = speed
+        self.objects: List[PhysicsObject] = []
+
+    def add(self, obj: PhysicsObject, start_x):
+        obj.pos = np.array([[float(start_x)], [float(self.pos_y)]])
+        self.objects.append(obj)
+
+    def update(self, dt):
+        dt_s = dt / 1000.0
         for obj in self.objects:
-            obj.draw(screen)
-        pygame.draw.circle(screen, (100,0,0), (m2px(self.x_m), m2px(self.y_m)), 5)
-
-    def is_close(self, obj: Object):
-        if math.sqrt((obj.pos_x_real - self.x_m)**2 + (obj.pos_y_real - self.y_m)**2) < 1e-1:
-            return True 
-        else:
-            return False
+            new_pos = obj.pos.copy()
+            new_pos[0, 0] += self.speed * dt_s
+            obj.pos = new_pos
 
 
-def main(): 
+
+        self.objects = [o for o in self.objects if m2px(o.x) < dim + 100]
+
+    def draw(self, screen):
+        py = m2px(self.pos_y)
+        ph = m2px(self.height)
+        pygame.draw.rect(screen, (40, 120, 40), (0, py - ph//2, dim, ph))
+        for obj in self.objects: obj.draw(screen)
+
+def main():
     pygame.init()
     screen = pygame.display.set_mode((dim, dim))
     clock = pygame.time.Clock()
-    running = True 
+    
+    gantry = Structure(3.5, 4.0, 4.0, 4.0)
+    tape_machine = Structure(1.0, 1.0, 4.3, 4.0)
+    pallet = Structure(1, 1, 5, 2.7)
 
-    gantry = Structure(x_len_real=3.5, y_len_real=4, pos_x_real=4, pos_y_real=4)
-    tape_closing = Structure(x_len_real=1, y_len_real=1, pos_x_real=4.3, pos_y_real=4)
 
-    microwave = Object(x_len_real=0.67, y_len_real=0.58, mass = 40, name ="MW")
-    thermocol = Object(x_len_real=0.67, y_len_real=0.58, mass = 1, name ="thermocol")
-    packaging = Object(x_len_real=0.67, y_len_real=0.58, mass = 1, name ="package")
-    line = Line(pos_y_real=int(8/2), height_real=1)
 
-    ee = EndEffector(gantry.pos_x_real, gantry.pos_y_real, gantry)
 
-    line.add(thermocol, start_x_m=0.05)
-    line.add(packaging, start_x_m=thermocol.x_len_real + 0.05)
-    line.add(microwave, start_x_m=thermocol.x_len_real + packaging.x_len_real + 0.05)
+    ee = EndEffector(4.0, 4.0, gantry)
+    
+    mw = PhysicsObject(0.67, 0.58, 40, name="MW")
+    tc = PhysicsObject(0.67, 0.58, 1, name="TC")
+    pk = PhysicsObject(0.67, 0.58, 1, name="Box")
+    
+    line = Line(pos_y=4.0, height=1.0)
+    line.add(tc, 0.05)
+    line.add(pk, 0.8)
+    line.add(mw, 1.6)
 
-    # I need my end effector to slave itself to certain positions, and then go not from fixed points but to other points, and it should collect data on its profile
     state = "IDLE"
+    running = True
 
-    while running: 
-        for event in pygame.event.get(): 
-            if event.type == pygame.QUIT: 
-                running = False 
+    home_pos = np.array([[4.0],[4.0]])
 
+    palletized = []
+
+    while running:
         dt = clock.tick(60)
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT: running = False
 
-        screen.fill("purple")
+        # Current Target defaults to EE current pos if no state is active
+        target = ee.pos.copy()
 
+        # State Machine Logic
+        if state == "IDLE":
+            target=home_pos
+            if gantry.contains(mw.pos) and not pallet.contains(mw.pos): 
+                print("I'm in idle right now")
+                print("Microwave is at:", mw.pos[0], mw.pos[1])
+                print("EE is at: ", ee.pos[0], ee.pos[1])
+                state = "PICK_MW"
 
+        elif state == "PICK_MW":
+            target = mw.pos
+            if ee.is_close(mw):
+                ee.pick(mw, line); state = "PLACE_MW"
 
-        target_x, target_y = ee.x_m, ee.y_m
-        match state:
-            case "IDLE":
-                if gantry.contains(microwave.pos_x_real, microwave.pos_y_real):
-                    state = "PICK_MICROWAVE"
+        elif state == "PLACE_MW":
+            target = pk.pos
+            if ee.is_close(pk):
+                ee.place_inside(mw,pk); state = "PICK_TC"
 
-            case "PICK_MICROWAVE":
-                target_x, target_y = microwave.pos_x_real, microwave.pos_y_real
-                if ee.is_close(microwave):
-                    ee.pick(microwave, line)
-                    state = "PLACE_MICROWAVE"
+        elif state == "PICK_TC":
+            target = tc.pos
+            if ee.is_close(tc):
+                ee.pick(tc, line); state = "PLACE_TC"
 
-            case "PLACE_MICROWAVE":
-                target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
-                if ee.is_close(packaging):
-                    ee.place(microwave)
-                    state = "PICK_THERMOCOL"
+        elif state == "PLACE_TC":
+            target = pk.pos
+            if ee.is_close(pk):
+                ee.place_inside(tc, pk); state = "AWAIT_TAPE_IN"
 
-            case "PICK_THERMOCOL":
-                target_x, target_y = thermocol.pos_x_real, thermocol.pos_y_real
-                if ee.is_close(thermocol):
-                    ee.pick(thermocol, line)
-                    state = "PLACE_THERMOCOL"
+        elif state == "AWAIT_TAPE_IN":
+            target = tape_machine.pos - np.array([[0.8], [0.0]])
+            if tape_machine.contains(pk.pos): state = "AWAIT_TAPE_OUT"
 
-            case "PLACE_THERMOCOL":
-                target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
-                if ee.is_close(packaging):
-                    ee.place(thermocol)
-                    state = "AWAIT_TAPE_ENTRY"
+        elif state == "AWAIT_TAPE_OUT":
+            target = tape_machine.pos + np.array([[0.8], [0.0]])
+            if not tape_machine.contains(pk.pos) and gantry.contains(pk.pos):
+                state = "PICK_PACKAGED"
 
-            case "AWAIT_TAPE_ENTRY":
-                # The robot waits while the belt moves the package into the taper
-                # We can set target to a neutral "home" or the edge of the taper
-                target_x, target_y = tape_closing.pos_x_real - 0.5, tape_closing.pos_y_real
+        elif state == "PICK_PACKAGED":
+            target = pk.pos
+            if ee.is_close(pk):
+                ee.pick(pk, line); state = "PLACE_PACKAGED"
 
-                if tape_closing.contains(packaging.pos_x_real, packaging.pos_y_real):
-                    state = "AWAIT_TAPE_EXIT"
+        elif state == "PLACE_PACKAGED":
+            target = pallet.pos
+            if pallet.is_close(ee, threshold=0.15):
+                obj = ee.place(pk)
+                if obj: 
+                    palletized.append(obj)
+                print("Successfully palletized!")
+                state = "IDLE"
 
-            case "AWAIT_TAPE_EXIT":
-                # The package is currently being taped. Wait for it to clear the structure.
-                target_x, target_y = tape_closing.pos_x_real + 0.5, tape_closing.pos_y_real
-
-                if not tape_closing.contains(packaging.pos_x_real, packaging.pos_y_real):
-                    # Only proceed if it's still within the gantry's reach
-                    if gantry.contains(packaging.pos_x_real, packaging.pos_y_real):
-                        state = "PICK_PACKAGED"
-
-            case "PICK_PACKAGED":
-                # Assuming the EE needs to pick up the combined package now
-                target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
-                if ee.is_close(packaging):
-                    ee.pick(packaging, line)
-                    state = "PLACE_PACKAGED"
-
-            case "PLACE_PACKAGED":
-                target_x, target_y = tape_closing.pos_x_real, tape_closing.pos_y_real
-                if tape_closing.contains(ee.x_m, ee.y_m):
-                    ee.place(packaging, line)
-                    state = "IDLE"
-
-        ee.update(dt, target_x, target_y)
-
-
-
-        line.draw(screen)
-        gantry.draw(screen)
-        tape_closing.draw(screen)
-
-
-        ee.draw(screen)
+        # Logic & Physics
+        ee.update(dt, target)
         line.update(dt)
 
-        font = pygame.font.SysFont('Arial',32)
-        text_surface = font.render(state, True, (255,255,255))
-        screen.blit(text_surface, (600,600))
+        # Rendering
+        screen.fill((50, 20, 70))
+        line.draw(screen)
+        gantry.draw(screen)
+        tape_machine.draw(screen)
+        ee.draw(screen)
+        pallet.draw(screen)
 
-
-
+        for obj in palletized:
+            obj.draw(screen)
+        
+        img = pygame.font.SysFont('Arial', 24).render(f"STATE: {state}", True, (255,255,255))
+        screen.blit(img, (20, 20))
         pygame.display.flip()
-
-
 
 if __name__ == "__main__":
     main()
