@@ -28,13 +28,18 @@ class Structure():
 
         self.pos_x_real = pos_x_real
         self.pos_y_real = pos_y_real
-        self.pos_x_px = m2px(self.pos_x_real)
-        self.pos_y_px = m2px(self.pos_y_real)
+
+
+    def pos_x_px(self):
+        return m2px(self.pos_x_real)
+
+    def pos_y_px(self):
+        return m2px(self.pos_y_real)
 
     def draw(self, screen):
         color = (180, 180, 180)
         t = self.outline_px
-        x, y, w, h = self.pos_x_px - self.x_len_px/2, self.pos_y_px - self.y_len_px/2, self.x_len_px, self.y_len_px
+        x, y, w, h = self.pos_x_px() - self.x_len_px/2, self.pos_y_px() - self.y_len_px/2, self.x_len_px, self.y_len_px
 
         # Top, bottom, left, right bars
         pygame.draw.rect(screen, color, pygame.Rect(x,         y,         w, t))  # top
@@ -42,13 +47,34 @@ class Structure():
         pygame.draw.rect(screen, color, pygame.Rect(x,         y,         t, h))  # left
         pygame.draw.rect(screen, color, pygame.Rect(x + w - t, y,         t, h))  # right
 
+class EndEffector:
+    def __init__(self, x_m, y_m):
+        self.x_m = x_m
+        self.y_m = y_m 
+        self.vx_m = 0
+        self.vy_m = 0
+
+    def update(self, dt, target_x_m, target_y_m):
+        dt_s = dt / 1000.0
+
+        k = 2.0
+
+        self.vx = k * (target_x_m - self.x_m)
+        self.vy = k * (target_y_m - self.y_m) 
+
+        self.x_m += self.vx * dt_s 
+        self.y_m += self.vy * dt_s
+    def draw(self, screen):
+        pygame.draw.circle(screen, (100,0,0), (m2px(self.x_m), m2px(self.y_m)), 5)
+
+
 
 
 
 
 # This is an object with mass 
 class Object():
-    def __init__(self, x_len_real, y_len_real, mass, pos_x_real = 0, pos_y_real = 0, name="MW", rotate=True):
+    def __init__(self, x_len_real: float, y_len_real : float, mass, pos_x_real = 0.0, pos_y_real = 0.0, name="MW", rotate=True):
         self.x_len_real = x_len_real # This is in m 
         self.y_len_real = y_len_real # This is in m
 
@@ -62,17 +88,21 @@ class Object():
 
         self.pos_x_real = pos_x_real
         self.pos_y_real = pos_y_real
-        self.pos_x_px = m2px(self.pos_x_real)
-        self.pos_y_px = m2px(self.pos_y_real)
 
 
         self.mass = mass # This is in m 
 
         self.name = name
 
+    def pos_x_px(self):
+        return m2px(self.pos_x_real)
+
+    def pos_y_px(self):
+        return m2px(self.pos_y_real)
+
     def draw(self, screen):
-        draw_x = int(self.pos_x_px - self.x_len_px/2)
-        draw_y = int(self.pos_y_px - self.y_len_px/2)
+        draw_x = int(self.pos_x_px() - self.x_len_px/2)
+        draw_y = int(self.pos_y_px() - self.y_len_px/2)
         rect = pygame.Rect(draw_x, draw_y, int(self.x_len_px), int(self.y_len_px))
         pygame.draw.rect(screen, (60, 60, 80), rect)
         font = pygame.font.SysFont(None, 16)
@@ -113,16 +143,16 @@ class Line():
         if not self.stopped:
             dt_s = dt / 1000.0
             for obj in self.objects:
-                obj.pos_x_px += self.speed_px * dt_s
+                obj.pos_x_real += self.speed_real * dt_s
             # Remove objects that have left the screen
-            self.objects = [o for o in self.objects if o.pos_x_px < dim + 100]
+            self.objects = [o for o in self.objects if o.pos_x_px() < dim + 100]
 
     def toggle(self):
         self.stopped = not self.stopped
 
     def add(self, obj: Object, start_x_m=0.0): # Start_x is in m 
-        obj.pos_x_px = m2px(int(start_x_m))
-        obj.pos_y_px = self.pos_y_px # Center object vertically
+        obj.pos_x_real = start_x_m
+        obj.pos_y_real = self.pos_y_real
         self.objects.append(obj)
 
     def remove(self, obj: Object):
@@ -155,6 +185,8 @@ def main():
     packaging = Object(x_len_real=0.67, y_len_real=0.58, mass = 1, name ="package")
     line = Line(pos_y_real=int(8/2), height_real=1)
 
+    ee = EndEffector(gantry.pos_x_real, gantry.pos_y_real)
+
     line.add(thermocol, start_x_m=0.05)
     line.add(packaging, start_x_m=thermocol.x_len_real + 0.05)
     line.add(microwave, start_x_m=thermocol.x_len_real + packaging.x_len_real + 0.05)
@@ -180,6 +212,10 @@ def main():
         line.draw(screen)
         gantry.draw(screen)
         tape_closing.draw(screen)
+
+        ee.update(dt, microwave.pos_x_real, microwave.pos_y_real)
+
+        ee.draw(screen)
 
         line.update(dt)
 
