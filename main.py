@@ -18,7 +18,7 @@ def m2px(quantity_px):
     return quantity_m
 
 
-class Gantry(): 
+class Structure(): 
     OUTLINE_THICKNESS_REAL = 0.025  # 2.5cm in meters
     def __init__(self, x_len_real, y_len_real, pos_x_px, pos_y_px):
         self.x_len_px = m2px(x_len_real) # This is in px
@@ -44,12 +44,16 @@ class Gantry():
 
 # This is an object with mass 
 class Object():
-    def __init__(self, x_len_real, y_len_real, pos_x_px, pos_y_px, mass, name="MW"):
+    def __init__(self, x_len_real, y_len_real, pos_x_px, pos_y_px, mass, name="MW", rotate=True):
         self.x_len_real = x_len_real # This is in m 
         self.y_len_real = y_len_real # This is in m
 
-        self.x_len_px = m2px(self.x_len_real)
-        self.y_len_px = m2px(self.y_len_real)
+        if rotate==True:
+            self.x_len_px = m2px(self.y_len_real)
+            self.y_len_px = m2px(self.x_len_real)
+        else:
+            self.x_len_px = m2px(self.x_len_real)
+            self.y_len_px = m2px(self.y_len_real)
 
         self.pos_x_px = pos_x_px
         self.pos_y_px = pos_y_px
@@ -84,12 +88,18 @@ class Line():
 
         self.objects: list[Object] = []
 
+        self.stopped = False
+
     def update(self, dt):
-        dt_s = dt / 1000.0
-        for obj in self.objects:
-            obj.pos_x_px += self.speed_px * dt_s
-        # Remove objects that have left the screen
-        self.objects = [o for o in self.objects if o.pos_x_px < dim + 100]
+        if not self.stopped:
+            dt_s = dt / 1000.0
+            for obj in self.objects:
+                obj.pos_x_px += self.speed_px * dt_s
+            # Remove objects that have left the screen
+            self.objects = [o for o in self.objects if o.pos_x_px < dim + 100]
+
+    def toggle(self):
+        self.stopped = not self.stopped
 
     def add(self, obj: Object, start_x_m=0.0): # Start_x is in m 
         obj.pos_x_px = m2px(float(start_x_m))
@@ -118,9 +128,10 @@ def main():
     clock = pygame.time.Clock()
     running = True 
 
-    gantry = Gantry(x_len_real=3, y_len_real=3, pos_x_px=dim/2, pos_y_px=dim/2)
+    gantry = Structure(x_len_real=3, y_len_real=3, pos_x_px=dim/2, pos_y_px=dim/2)
+    tape_closing = Structure(x_len_real=1, y_len_real=1, pos_x_px=dim/2, pos_y_px=dim/2)
     microwave = Object(x_len_real=0.67, y_len_real=0.58, pos_x_px = 100, pos_y_px = 100, mass = 40, name ="MW")
-    thermocol = Object(x_len_real=0.67, y_len_real=0.58, pos_x_px = 0, pos_y_px = 100, mass = 40, name ="thermocol")
+    thermocol = Object(x_len_real=0.67, y_len_real=0.58, pos_x_px = 0, pos_y_px = 100, mass = 1, name ="thermocol")
     line = Line(pos_y_px=int(dim/2), height_real=1)
 
     line.add(microwave, start_x_m=1)
@@ -136,8 +147,9 @@ def main():
         screen.fill("purple")
 
 
-        gantry.draw(screen)
         line.draw(screen)
+        gantry.draw(screen)
+        tape_closing.draw(screen)
 
         line.update(dt)
 
