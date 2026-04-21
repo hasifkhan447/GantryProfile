@@ -205,19 +205,20 @@ class EndEffector:
             obj.draw(screen)
         pygame.draw.circle(screen, (100,0,0), (m2px(self.x_m), m2px(self.y_m)), 5)
 
+    def is_close(self, obj: Object):
+        if math.sqrt((obj.pos_x_real - self.x_m)**2 + (obj.pos_y_real - self.y_m)**2) < 1e-2:
+            return True 
+        else:
+            return False
 
-def is_close(obj1: Object, thing_with_pos): #TODO: Add proper inheritance here
-    if math.sqrt((obj1.pos_x_real - thing_with_pos.pos_x_real)**2 + (obj1.pos_y_real - thing_with_pos.pos_y_real)**2) < 1e-2:
-        return True 
-    else:
-        return False
 
-def in_structure(thing_with_pos, struct: Structure):
-    if ( struct.pos_x_real + struct.pos_x_real/2 < thing_with_pos.pos_x_real  and thing_with_pos.x_len_real < struct.pos_x_real + struct.x_len_real/2) and (struct.pos_y_real + struct.pos_y_real/2 < thing_with_pos.pos_y_real  and thing_with_pos.y_len_real < struct.pos_y_real + struct.y_len_real/2):
-        return True 
-    else: 
-        return False
 
+def in_structure(obj, struct):
+    # Check if object center is within structure bounds
+    half_w = struct.x_len_real / 2
+    half_h = struct.y_len_real / 2
+    return (struct.pos_x_real - half_w < obj.pos_x_real < struct.pos_x_real + half_w and
+            struct.pos_y_real - half_h < obj.pos_y_real < struct.pos_y_real + half_h)
 
 
 def main(): 
@@ -268,32 +269,32 @@ def main():
 
             case "PICK_MICROWAVE":
                 target_x, target_y = microwave.pos_x_real, microwave.pos_y_real
-                if is_close(microwave, ee):
+                if ee.is_close(microwave):
                     ee.pick(microwave, line)
                     state = "PLACE_MICROWAVE"
 
             case "PLACE_MICROWAVE":
                 target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
-                if is_close(packaging, ee):
+                if ee.is_close(packaging):
                     ee.place(microwave)
                     state = "PICK_THERMOCOL"
 
             case "PICK_THERMOCOL":
                 target_x, target_y = thermocol.pos_x_real, thermocol.pos_y_real
-                if is_close(thermocol, ee):
+                if ee.is_close(thermocol):
                     ee.pick(thermocol, line)
                     state = "PLACE_THERMOCOL"
 
             case "PLACE_THERMOCOL":
                 target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
-                if is_close(packaging, ee):
+                if ee.is_close(packaging):
                     ee.place(thermocol)
                     state = "PICK_PACKAGED"
 
             case "PICK_PACKAGED":
                 # Assuming the EE needs to pick up the combined package now
                 target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
-                if is_close(packaging, ee):
+                if ee.is_close(packaging):
                     ee.pick(packaging, line)
                     state = "PLACE_PACKAGED"
 
