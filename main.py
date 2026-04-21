@@ -193,14 +193,8 @@ def main():
 
     ee = EndEffector(4.0, 4.0, gantry)
     
-    mw = PhysicsObject(0.67, 0.58, 40, name="MW")
-    tc = PhysicsObject(0.67, 0.58, 1, name="TC")
-    pk = PhysicsObject(0.67, 0.58, 1, name="Box")
     
     line = Line(pos_y=4.0, height=1.0)
-    line.add(tc, 0.05)
-    line.add(pk, 0.8)
-    line.add(mw, 1.6)
 
     state = "IDLE"
     running = True
@@ -209,10 +203,26 @@ def main():
 
     palletized = []
 
+    current_mw: Optional[PhysicsObject] = None
+    current_tc: Optional[PhysicsObject] = None 
+    current_pk: Optional[PhysicsObject] = None 
+
+    spawn_rate = 8000
+    spawn_timer = spawn_rate - 1
     while running:
         dt = clock.tick(60)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT: running = False
+
+        spawn_timer += dt
+        if spawn_timer > spawn_rate:
+            line.add(PhysicsObject(0.67, 0.58, 40, name="MW"), 0.0)
+            line.add(PhysicsObject(0.67, 0.58, 1, name="Box"), -0.8)
+            line.add(PhysicsObject(0.67, 0.58, 1, name="TC"), -1.6)
+            spawn_timer = 0
+
+
 
         # Current Target defaults to EE current pos if no state is active
         target = ee.pos.copy()
@@ -220,53 +230,72 @@ def main():
         # State Machine Logic
         if state == "IDLE":
             target=home_pos
-            if gantry.contains(mw.pos) and not pallet.contains(mw.pos): 
+            candidates = [o for o in line.objects if o.name == "MW" and gantry.contains(o.pos)]
+            if candidates:
+                current_mw = candidates[0]
                 print("I'm in idle right now")
-                print("Microwave is at:", mw.pos[0], mw.pos[1])
+                print("Microwave is at:", current_mw.pos[0], current_mw.pos[1])
                 print("EE is at: ", ee.pos[0], ee.pos[1])
                 state = "PICK_MW"
 
         elif state == "PICK_MW":
-            target = mw.pos
-            if ee.is_close(mw):
-                ee.pick(mw, line); state = "PLACE_MW"
+            if current_mw != None: 
+                target = current_mw.pos
+                if ee.is_close(current_mw):
+                    ee.pick(current_mw, line); state = "PLACE_MW"
 
         elif state == "PLACE_MW":
-            target = pk.pos
-            if ee.is_close(pk):
-                ee.place_inside(mw,pk); state = "PICK_TC"
+            pk_candidates = [o for o in line.objects if o.name == "Box" and gantry.contains(o.pos)]
+            if pk_candidates:
+                current_pk = pk_candidates[0]
+                target = current_pk.pos
+                if ee.is_close(current_pk) and current_mw != None:
+                    ee.place_inside(current_mw,current_pk); state = "PICK_TC"
 
         elif state == "PICK_TC":
-            target = tc.pos
-            if ee.is_close(tc):
-                ee.pick(tc, line); state = "PLACE_TC"
+            tc_candidates = [o for o in line.objects if o.name == "TC" and gantry.contains(o.pos)]
+            current_tc = tc_candidates[0]
+            target = current_tc.pos
+            if ee.is_close(current_tc):
+                ee.pick(current_tc, line); state = "PLACE_current_tc"
 
-        elif state == "PLACE_TC":
-            target = pk.pos
-            if ee.is_close(pk):
-                ee.place_inside(tc, pk); state = "AWAIT_TAPE_IN"
+        elif state == "PLACE_current_tc":
+            if (current_pk != None and current_tc != None): 
+                target = current_pk.pos
+                if ee.is_close(current_pk):
+                    ee.place_inside(current_tc, current_pk); state = "AWAIT_TAPE_IN"
+            # else: 
+            #     state = "IDLE"
 
         elif state == "AWAIT_TAPE_IN":
-            target = tape_machine.pos - np.array([[0.8], [0.0]])
-            if tape_machine.contains(pk.pos): state = "AWAIT_TAPE_OUT"
+            if (current_pk != None):
+                target = tape_machine.pos - np.array([[0.8], [0.0]])
+                if tape_machine.contains(current_pk.pos): state = "AWAIT_TAPE_OUT"
 
         elif state == "AWAIT_TAPE_OUT":
-            target = tape_machine.pos + np.array([[0.8], [0.0]])
-            if not tape_machine.contains(pk.pos) and gantry.contains(pk.pos):
-                state = "PICK_PACKAGED"
+            if (current_pk != None):
+                target = tape_machine.pos + np.array([[0.8], [0.0]])
+                if not tape_machine.contains(current_pk.pos) and gantry.contains(current_pk.pos):
+                    state = "PICK_PACKAGED"
 
         elif state == "PICK_PACKAGED":
-            target = pk.pos
-            if ee.is_close(pk):
-                ee.pick(pk, line); state = "PLACE_PACKAGED"
+            if (current_pk != None):
+                target = current_pk.pos
+                if ee.is_close(current_pk):
+                    ee.pick(current_pk, line); state = "PLACE_PACKAGED"
+            else: 
+                state = "IDLE"
 
         elif state == "PLACE_PACKAGED":
-            target = pallet.pos
-            if pallet.is_close(ee, threshold=0.15):
-                obj = ee.place(pk)
-                if obj: 
-                    palletized.append(obj)
-                print("Successfully palletized!")
+            if (current_pk != None):
+                target = pallet.pos
+                if pallet.is_close(ee, threshold=0.15):
+                    obj = ee.place(current_pk)
+                    if obj: 
+                        palletized.append(obj)
+                    print("Successfully palletized!")
+                    state = "IDLE"
+            else: 
                 state = "IDLE"
 
         # Logic & Physics
