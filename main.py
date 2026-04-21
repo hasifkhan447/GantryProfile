@@ -254,10 +254,14 @@ def main():
 
         elif state == "PICK_TC":
             tc_candidates = [o for o in line.objects if o.name == "TC" and gantry.contains(o.pos)]
-            current_tc = tc_candidates[0]
-            target = current_tc.pos
-            if ee.is_close(current_tc):
-                ee.pick(current_tc, line); state = "PLACE_current_tc"
+            if tc_candidates:
+                current_tc = tc_candidates[0]
+                target = current_tc.pos
+                if ee.is_close(current_tc):
+                    ee.pick(current_tc, line); state = "PLACE_current_tc"
+            else: 
+                target = home_pos
+
 
         elif state == "PLACE_current_tc":
             if (current_pk != None and current_tc != None): 
