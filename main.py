@@ -77,6 +77,7 @@ class Obj:
         self._pos = np.array([[float(pos_x)], [float(pos_y)]])
         self.size_real = np.array([[float(x_len)], [float(y_len)]])
         self.children: List['PhysicsObject'] = []
+        self.status = "NONE"
 
     @property 
     def pos(self):
@@ -282,7 +283,7 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT: 
                 running = False
-                # logger.save_to_csv()
+                logger.save_to_csv()
                 logger.plot_data()
 
 
@@ -297,6 +298,18 @@ def main():
 
         # Current Target defaults to EE current pos if no state is active
         target = ee.pos.copy()
+        targetable_microwaves = [o for o in line.objects if o.name == "MW" and gantry.contains(o.pos)]
+        for microwave in targetable_microwaves:
+            if microwave.status == "NONE":
+                microwave.status = "PACKAGING"
+
+            elif microwave.status == "PACKAGING" and tape_machine.contains(microwave.pos):
+                microwave.status = "TAPING"
+
+            elif microwave.status == "TAPING" and not tape_machine.contains(microwave.pos):
+                microwave.status = "READY"
+
+
 
         # State Machine Logic
         if state == "IDLE":
@@ -304,9 +317,6 @@ def main():
             candidates = [o for o in line.objects if o.name == "MW" and gantry.contains(o.pos)]
             if candidates:
                 current_mw = candidates[0]
-                print("I'm in idle right now")
-                print("Microwave is at:", current_mw.pos[0], current_mw.pos[1])
-                print("EE is at: ", ee.pos[0], ee.pos[1])
                 state = "PICK_MW"
 
         elif state == "PICK_MW":
