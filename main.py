@@ -18,8 +18,7 @@ def m2px(quantity_px):
     return quantity_m
 
 
-#TODO: Need some kind of drawing functionality for each of these
-class Gantry(): #TODO: Show a kind of grayed out, dotted line around the line with the dimensions
+class Gantry(): 
     OUTLINE_THICKNESS_REAL = 0.025  # 2.5cm in meters
     def __init__(self, x_len_real, y_len_real, pos_x_px, pos_y_px):
         self.x_len_px = m2px(x_len_real) # This is in px
@@ -45,7 +44,7 @@ class Gantry(): #TODO: Show a kind of grayed out, dotted line around the line wi
 
 # This is an object with mass 
 class Object():
-    def __init__(self, x_len_real, y_len_real, pos_x_px, pos_y_px, mass):
+    def __init__(self, x_len_real, y_len_real, pos_x_px, pos_y_px, mass, name="MW"):
         self.x_len_real = x_len_real # This is in m 
         self.y_len_real = y_len_real # This is in m
 
@@ -57,24 +56,26 @@ class Object():
 
         self.mass = mass # This is in m 
 
+        self.name = name
+
     def draw(self, screen):
         draw_x = int(self.pos_x_px - self.x_len_px/2)
         draw_y = int(self.pos_y_px - self.y_len_px/2)
         rect = pygame.Rect(draw_x, draw_y, int(self.x_len_px), int(self.y_len_px))
         pygame.draw.rect(screen, (60, 60, 80), rect)
         font = pygame.font.SysFont(None, 16)
-        label = font.render("MW", True, (200, 200, 200))
+        label = font.render(self.name, True, (200, 200, 200))
         screen.blit(label, (int(draw_x) + 2, int(draw_y) + int(self.y_len_px) // 2 - 8))
 
 
 
 class Line():
     """Assembly line. Owns objects on it and moves them forward each tick."""
-    def __init__(self, pos_y_px=800, height_real=80):
+    def __init__(self, pos_y_px=800, height_real=80, speed_real=0.30):
         self.height_real = height_real
 
         self.height_px = m2px(self.height_real)
-        self.speed_real = 1.5   # m/s
+        self.speed_real = speed_real   # m/s
         self.speed_px = m2px(self.speed_real)  # px/s
         self.pos_y_px = pos_y_px 
 
@@ -90,8 +91,8 @@ class Line():
         # Remove objects that have left the screen
         self.objects = [o for o in self.objects if o.pos_x_px < dim + 100]
 
-    def add(self, obj: Object, start_x=0.0):
-        obj.pos_x_px = float(start_x)
+    def add(self, obj: Object, start_x_m=0.0): # Start_x is in m 
+        obj.pos_x_px = m2px(float(start_x_m))
         obj.pos_y_px = self.pos_y_px # Center object vertically
         self.objects.append(obj)
 
@@ -118,10 +119,12 @@ def main():
     running = True 
 
     gantry = Gantry(x_len_real=3, y_len_real=3, pos_x_px=dim/2, pos_y_px=dim/2)
-    microwave = Object(x_len_real=0.67, y_len_real=0.58, pos_x_px = 100, pos_y_px = 100, mass = 40)
+    microwave = Object(x_len_real=0.67, y_len_real=0.58, pos_x_px = 100, pos_y_px = 100, mass = 40, name ="MW")
+    thermocol = Object(x_len_real=0.67, y_len_real=0.58, pos_x_px = 0, pos_y_px = 100, mass = 40, name ="thermocol")
     line = Line(pos_y_px=int(dim/2), height_real=1)
 
-    line.add(microwave)
+    line.add(microwave, start_x_m=1)
+    line.add(thermocol, start_x_m=0.10)
 
     while running: 
         for event in pygame.event.get(): 
