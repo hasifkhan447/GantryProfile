@@ -20,9 +20,16 @@ def m2px(quantity_px):
     return quantity_m
 
 
+
+
+
+
+
 class Structure(): 
     OUTLINE_THICKNESS_REAL = 0.025  # 2.5cm in meters
     def __init__(self, x_len_real, y_len_real, pos_x_real, pos_y_real):
+        self.x_len_real = x_len_real
+        self.y_len_real = y_len_real
         self.x_len_px = m2px(x_len_real) # This is in px
         self.y_len_px = m2px(y_len_real) # This is in px
         self.outline_px = m2px(self.OUTLINE_THICKNESS_REAL)
@@ -47,9 +54,6 @@ class Structure():
         pygame.draw.rect(screen, color, pygame.Rect(x,         y + h - t, w, t))  # bottom
         pygame.draw.rect(screen, color, pygame.Rect(x,         y,         t, h))  # left
         pygame.draw.rect(screen, color, pygame.Rect(x + w - t, y,         t, h))  # right
-
-
-
 
 
 
@@ -175,6 +179,10 @@ class EndEffector:
         self.x_m += self.vx * dt_s 
         self.y_m += self.vy * dt_s
 
+        for obj in self.objects:
+            obj.pos_x_real = self.x_m
+            obj.pos_y_real = self.y_m
+
     def add(self, obj: Object): # Start_x is in m 
         self.objects.append(obj)
 
@@ -192,12 +200,23 @@ class EndEffector:
             self.objects.remove(obj)
             reciever.add(obj, start_x_m = self.x_m)
 
-
-
     def draw(self, screen):
-        pygame.draw.circle(screen, (100,0,0), (m2px(self.x_m), m2px(self.y_m)), 5)
         for obj in self.objects:
             obj.draw(screen)
+        pygame.draw.circle(screen, (100,0,0), (m2px(self.x_m), m2px(self.y_m)), 5)
+
+
+def is_close(obj1: Object, thing_with_pos): #TODO: Add proper inheritance here
+    if math.sqrt((obj1.pos_x_real - thing_with_pos.pos_x_real)**2 + (obj1.pos_y_real - thing_with_pos.pos_y_real)**2) < 1e-2:
+        return True 
+    else:
+        return False
+
+def in_structure(thing_with_pos, struct: Structure):
+    if ( struct.pos_x_real + struct.pos_x_real/2 < thing_with_pos.pos_x_real  and thing_with_pos.x_len_real < struct.pos_x_real + struct.x_len_real/2) and (struct.pos_y_real + struct.pos_y_real/2 < thing_with_pos.pos_y_real  and thing_with_pos.y_len_real < struct.pos_y_real + struct.y_len_real/2):
+        return True 
+    else: 
+        return False
 
 
 
@@ -228,6 +247,7 @@ def main():
     # 1. We will first "move" directly to the position, and calculate the total x,y,z displacement
     # 2. We will secondly "move" according to a specified profile, by anticipating where to move based on the speed of the line (which we know)
 
+    state = "IDLE"
 
     while running: 
         for event in pygame.event.get(): 
@@ -238,11 +258,52 @@ def main():
 
         screen.fill("purple")
 
-        ee.update(dt, microwave.pos_x_real, microwave.pos_y_real)
 
 
-        if math.sqrt((ee.x_m - microwave.pos_x_real)**2 + (ee.y_m - microwave.pos_y_real)**2) < 1e-3:
-            ee.pick(microwave, line)
+        target_x, target_y = ee.x_m, ee.y_m
+        match state:
+            case "IDLE":
+                if in_structure(microwave, gantry):
+                    state = "PICK_MICROWAVE"
+
+            case "PICK_MICROWAVE":
+                target_x, target_y = microwave.pos_x_real, microwave.pos_y_real
+                if is_close(microwave, ee):
+                    ee.pick(microwave, line)
+                    state = "PLACE_MICROWAVE"
+
+            case "PLACE_MICROWAVE":
+                target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
+                if is_close(packaging, ee):
+                    ee.place(microwave)
+                    state = "PICK_THERMOCOL"
+
+            case "PICK_THERMOCOL":
+                target_x, target_y = thermocol.pos_x_real, thermocol.pos_y_real
+                if is_close(thermocol, ee):
+                    ee.pick(thermocol, line)
+                    state = "PLACE_THERMOCOL"
+
+            case "PLACE_THERMOCOL":
+                target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
+                if is_close(packaging, ee):
+                    ee.place(thermocol)
+                    state = "PICK_PACKAGED"
+
+            case "PICK_PACKAGED":
+                # Assuming the EE needs to pick up the combined package now
+                target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
+                if is_close(packaging, ee):
+                    ee.pick(packaging, line)
+                    state = "PLACE_PACKAGED"
+
+            case "PLACE_PACKAGED":
+                target_x, target_y = tape_closing.pos_x_real, tape_closing.pos_y_real
+                if in_structure(ee, tape_closing):
+                    ee.place(packaging, line)
+                    state = "IDLE"
+        ee.update(dt, target_x, target_y)
+
 
 
         line.draw(screen)
@@ -252,6 +313,10 @@ def main():
 
         ee.draw(screen)
         line.update(dt)
+
+        font = pygame.font.SysFont('Arial',32)
+        text_surface = font.render(state, True, (255,255,255))
+        screen.blit(text_surface, (600,600))
 
 
 
