@@ -25,35 +25,6 @@ def m2px(quantity_px):
 
 
 
-class Structure(): 
-    OUTLINE_THICKNESS_REAL = 0.025  # 2.5cm in meters
-    def __init__(self, x_len_real, y_len_real, pos_x_real, pos_y_real):
-        self.x_len_real = x_len_real
-        self.y_len_real = y_len_real
-        self.x_len_px = m2px(x_len_real) # This is in px
-        self.y_len_px = m2px(y_len_real) # This is in px
-        self.outline_px = m2px(self.OUTLINE_THICKNESS_REAL)
-
-        self.pos_x_real = pos_x_real
-        self.pos_y_real = pos_y_real
-
-
-    def pos_x_px(self):
-        return m2px(self.pos_x_real)
-
-    def pos_y_px(self):
-        return m2px(self.pos_y_real)
-
-    def draw(self, screen):
-        color = (180, 180, 180)
-        t = self.outline_px
-        x, y, w, h = self.pos_x_px() - self.x_len_px/2, self.pos_y_px() - self.y_len_px/2, self.x_len_px, self.y_len_px
-
-        # Top, bottom, left, right bars
-        pygame.draw.rect(screen, color, pygame.Rect(x,         y,         w, t))  # top
-        pygame.draw.rect(screen, color, pygame.Rect(x,         y + h - t, w, t))  # bottom
-        pygame.draw.rect(screen, color, pygame.Rect(x,         y,         t, h))  # left
-        pygame.draw.rect(screen, color, pygame.Rect(x + w - t, y,         t, h))  # right
 
 
 
@@ -96,7 +67,44 @@ class Object():
         screen.blit(label, (int(draw_x) + 2, int(draw_y) + int(self.y_len_px) // 2 - 8))
 
 
+class Structure(): 
+    OUTLINE_THICKNESS_REAL = 0.025  # 2.5cm in meters
+    def __init__(self, x_len_real, y_len_real, pos_x_real, pos_y_real):
+        self.x_len_real = x_len_real
+        self.y_len_real = y_len_real
+        self.x_len_px = m2px(x_len_real) # This is in px
+        self.y_len_px = m2px(y_len_real) # This is in px
+        self.outline_px = m2px(self.OUTLINE_THICKNESS_REAL)
 
+        self.pos_x_real = pos_x_real
+        self.pos_y_real = pos_y_real
+
+
+    def pos_x_px(self):
+        return m2px(self.pos_x_real)
+
+    def pos_y_px(self):
+        return m2px(self.pos_y_real)
+
+    def draw(self, screen):
+        color = (180, 180, 180)
+        t = self.outline_px
+        x, y, w, h = self.pos_x_px() - self.x_len_px/2, self.pos_y_px() - self.y_len_px/2, self.x_len_px, self.y_len_px
+
+        # Top, bottom, left, right bars
+        pygame.draw.rect(screen, color, pygame.Rect(x,         y,         w, t))  # top
+        pygame.draw.rect(screen, color, pygame.Rect(x,         y + h - t, w, t))  # bottom
+        pygame.draw.rect(screen, color, pygame.Rect(x,         y,         t, h))  # left
+        pygame.draw.rect(screen, color, pygame.Rect(x + w - t, y,         t, h))  # right
+
+
+    def contains(self, target_x, target_y):
+
+        half_w = self.x_len_real / 2
+        half_h = self.y_len_real / 2
+        # Check if the coordinates are within the left/right and top/bottom bounds
+        return (self.pos_x_real - half_w <= target_x <= self.pos_x_real + half_w and
+                self.pos_y_real - half_h <= target_y <= self.pos_y_real + half_h)
 
 
 
@@ -123,12 +131,6 @@ class Line():
         self.objects: list[Object] = []
 
         self.stopped = False
-
-
-
-
-
-
 
     def update(self, dt):
         if not self.stopped:
@@ -161,27 +163,52 @@ class Line():
         screen.blit(label, (8, self.pos_y_px + self.height_px/2 + 4))
 
 class EndEffector:
-    def __init__(self, x_m, y_m):
+    def __init__(self, x_m, y_m, structure):
         self.x_m = x_m
         self.y_m = y_m 
         self.vx_m = 0
         self.vy_m = 0
         self.objects: list[Object] = []
+        self.error_sum_x = 0
+        self.error_sum_y = 0
+
+        self.structure = structure;
 
     def update(self, dt, target_x_m, target_y_m):
         dt_s = dt / 1000.0
+        if dt_s <= 0: return
+        if ( not self.structure.contains(target_x_m, target_y_m)): return 
 
-        k = 2.0
 
-        self.vx = k * (target_x_m - self.x_m)
-        self.vy = k * (target_y_m - self.y_m) 
+        # 1. Calculate current Error
+        error_x = target_x_m - self.x_m
+        error_y = target_y_m - self.y_m
 
+        # 2. Update Integral (Accumulated Error)
+        self.error_sum_x += error_x * dt_s
+        self.error_sum_y += error_y * dt_s
+
+        # 3. PI Constants
+        # Kp is the "snap" (Proportional)
+        # Ki is the "force" to close the final gap (Integral)
+        kp = 5.0  
+        ki = 1.5  
+
+        # 4. Calculate Velocity Output
+        self.vx = (kp * error_x) + (ki * self.error_sum_x)
+        self.vy = (kp * error_y) + (ki * self.error_sum_y) 
+
+        # 5. Apply Movement
         self.x_m += self.vx * dt_s 
         self.y_m += self.vy * dt_s
 
+        # 6. Update held objects
         for obj in self.objects:
             obj.pos_x_real = self.x_m
             obj.pos_y_real = self.y_m
+
+
+
 
     def add(self, obj: Object): # Start_x is in m 
         self.objects.append(obj)
@@ -206,19 +233,10 @@ class EndEffector:
         pygame.draw.circle(screen, (100,0,0), (m2px(self.x_m), m2px(self.y_m)), 5)
 
     def is_close(self, obj: Object):
-        if math.sqrt((obj.pos_x_real - self.x_m)**2 + (obj.pos_y_real - self.y_m)**2) < 1e-2:
+        if math.sqrt((obj.pos_x_real - self.x_m)**2 + (obj.pos_y_real - self.y_m)**2) < 1e-1:
             return True 
         else:
             return False
-
-
-
-def in_structure(obj, struct):
-    # Check if object center is within structure bounds
-    half_w = struct.x_len_real / 2
-    half_h = struct.y_len_real / 2
-    return (struct.pos_x_real - half_w < obj.pos_x_real < struct.pos_x_real + half_w and
-            struct.pos_y_real - half_h < obj.pos_y_real < struct.pos_y_real + half_h)
 
 
 def main(): 
@@ -235,19 +253,13 @@ def main():
     packaging = Object(x_len_real=0.67, y_len_real=0.58, mass = 1, name ="package")
     line = Line(pos_y_real=int(8/2), height_real=1)
 
-    ee = EndEffector(gantry.pos_x_real, gantry.pos_y_real)
+    ee = EndEffector(gantry.pos_x_real, gantry.pos_y_real, gantry)
 
     line.add(thermocol, start_x_m=0.05)
     line.add(packaging, start_x_m=thermocol.x_len_real + 0.05)
     line.add(microwave, start_x_m=thermocol.x_len_real + packaging.x_len_real + 0.05)
 
     # I need my end effector to slave itself to certain positions, and then go not from fixed points but to other points, and it should collect data on its profile
-
-
-    # TODO: We will phase the collection into a few steps 
-    # 1. We will first "move" directly to the position, and calculate the total x,y,z displacement
-    # 2. We will secondly "move" according to a specified profile, by anticipating where to move based on the speed of the line (which we know)
-
     state = "IDLE"
 
     while running: 
@@ -264,7 +276,7 @@ def main():
         target_x, target_y = ee.x_m, ee.y_m
         match state:
             case "IDLE":
-                if in_structure(microwave, gantry):
+                if gantry.contains(microwave.pos_x_real, microwave.pos_y_real):
                     state = "PICK_MICROWAVE"
 
             case "PICK_MICROWAVE":
@@ -289,7 +301,24 @@ def main():
                 target_x, target_y = packaging.pos_x_real, packaging.pos_y_real
                 if ee.is_close(packaging):
                     ee.place(thermocol)
-                    state = "PICK_PACKAGED"
+                    state = "AWAIT_TAPE_ENTRY"
+
+            case "AWAIT_TAPE_ENTRY":
+                # The robot waits while the belt moves the package into the taper
+                # We can set target to a neutral "home" or the edge of the taper
+                target_x, target_y = tape_closing.pos_x_real - 0.5, tape_closing.pos_y_real
+
+                if tape_closing.contains(packaging.pos_x_real, packaging.pos_y_real):
+                    state = "AWAIT_TAPE_EXIT"
+
+            case "AWAIT_TAPE_EXIT":
+                # The package is currently being taped. Wait for it to clear the structure.
+                target_x, target_y = tape_closing.pos_x_real + 0.5, tape_closing.pos_y_real
+
+                if not tape_closing.contains(packaging.pos_x_real, packaging.pos_y_real):
+                    # Only proceed if it's still within the gantry's reach
+                    if gantry.contains(packaging.pos_x_real, packaging.pos_y_real):
+                        state = "PICK_PACKAGED"
 
             case "PICK_PACKAGED":
                 # Assuming the EE needs to pick up the combined package now
@@ -300,9 +329,10 @@ def main():
 
             case "PLACE_PACKAGED":
                 target_x, target_y = tape_closing.pos_x_real, tape_closing.pos_y_real
-                if in_structure(ee, tape_closing):
+                if tape_closing.contains(ee.x_m, ee.y_m):
                     ee.place(packaging, line)
                     state = "IDLE"
+
         ee.update(dt, target_x, target_y)
 
 
