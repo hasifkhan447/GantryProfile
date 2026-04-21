@@ -10,6 +10,66 @@ onem = 100  # 100px / 1m
 def m2px(m_val): return int(m_val * onem)
 def px2m(px_val): return px_val / onem
 
+class KinematicsLogger:
+    def __init__(self):
+        self.data = {
+            "time": [],
+            "x": [], "y": [], "z": [],
+            "vx": [], "vy": [], "vz": [],
+            "ax": [], "ay": [], "az": []
+        }
+        self.total_time = 0.0
+
+    def log(self, pos: np.ndarray, dt_ms: int):
+        dt = dt_ms / 1000.0
+        if dt <= 0: return
+
+        # Current Position
+        cur_x, cur_y = pos[0, 0], pos[1, 0]
+        cur_z = 0.0  # Placeholder for Z
+        
+        # Calculate Velocity (v = dx / dt)
+        vx, vy, vz = 0.0, 0.0, 0.0
+        if self.data["time"]:
+            vx = (cur_x - self.data["x"][-1]) / dt
+            vy = (cur_y - self.data["y"][-1]) / dt
+            vz = (cur_z - self.data["z"][-1]) / dt
+
+        # Calculate Acceleration (a = dv / dt)
+        ax, ay, az = 0.0, 0.0, 0.0
+        if len(self.data["vx"]) > 0:
+            ax = (vx - self.data["vx"][-1]) / dt
+            ay = (vy - self.data["vy"][-1]) / dt
+            az = (vz - self.data["vz"][-1]) / dt
+
+        # Append data
+        self.total_time += dt
+        self.data["time"].append(self.total_time)
+        self.data["x"].append(cur_x); self.data["y"].append(cur_y); self.data["z"].append(cur_z)
+        self.data["vx"].append(vx); self.data["vy"].append(vy); self.data["vz"].append(vz)
+        self.data["ax"].append(ax); self.data["ay"].append(ay); self.data["az"].append(az)
+
+    def save_to_csv(self, filename="kinematics_log.csv"):
+        import pandas as pd
+        df = pd.DataFrame(self.data)
+        df.to_csv(filename, index=False)
+        print(f"Data saved to {filename}")
+
+    def plot_data(self):
+            import matplotlib.pyplot as plt
+            fig, axs = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+            axs[0].plot(self.data["time"], self.data["x"], label="X Position")
+            axs[1].plot(self.data["time"], self.data["vx"], label="X Velocity", color='orange')
+            axs[2].plot(self.data["time"], self.data["ax"], label="X Acceleration", color='red')
+            for ax in axs: ax.legend(); ax.grid(True)
+            plt.xlabel("Time (s)")
+            plt.show()
+
+
+
+
+
+
 class Obj:
     """Base class for anything with a physical position in the 2D world."""
     def __init__(self, pos_x: float, pos_y: float, x_len: float, y_len: float):
@@ -180,6 +240,7 @@ class Line:
         for obj in self.objects: obj.draw(screen)
 
 def main():
+
     pygame.init()
     screen = pygame.display.set_mode((dim, dim))
     clock = pygame.time.Clock()
@@ -209,11 +270,21 @@ def main():
 
     spawn_rate = 8000
     spawn_timer = spawn_rate - 1
+
+    logger = KinematicsLogger()
+
+
+
+
     while running:
         dt = clock.tick(60)
 
         for event in pygame.event.get():
-            if event.type == pygame.QUIT: running = False
+            if event.type == pygame.QUIT: 
+                running = False
+                # logger.save_to_csv()
+                logger.plot_data()
+
 
         spawn_timer += dt
         if spawn_timer > spawn_rate:
@@ -320,6 +391,8 @@ def main():
         img = pygame.font.SysFont('Arial', 24).render(f"STATE: {state}", True, (255,255,255))
         screen.blit(img, (20, 20))
         pygame.display.flip()
+
+        logger.log(ee.pos, dt)
 
 if __name__ == "__main__":
     main()
