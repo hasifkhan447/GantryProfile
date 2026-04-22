@@ -139,7 +139,14 @@ class PhysicsObject(Obj):
     def draw(self, screen):
         w, h = m2px(self.size_real[0,0]), m2px(self.size_real[1,0])
         x, y = m2px(self.x) - w//2, m2px(self.y) - h//2
-        pygame.draw.rect(screen, (60, 60, 80), (x, y, w, h))
+
+
+        if (self.status == "PACKAGING"):
+            color = (0,100,0)
+        else:
+            color = (60, 60, 60)
+
+        pygame.draw.rect(screen, color, (x, y, w, h))
         label = pygame.font.SysFont(None, 16).render(self.name, True, (200, 200, 200))
         screen.blit(label, (x + 2, y + h//2 - 8))
 
@@ -158,7 +165,7 @@ class EndEffector(Obj):
         
         # S-Curve Constraints
         self.max_v = 0.5   # m/s (Your requested clamp)
-        self.max_a = 3   # m/s^2
+        self.max_a = 1   # m/s^2
         self.gain_p = 20.0 # How aggressively to snap to target
 
     def update(self, dt: int, target_vec: np.ndarray):
@@ -239,6 +246,7 @@ class Line:
         self.height = height
         self.speed = speed
         self.objects: List[PhysicsObject] = []
+        self.running = True
 
     def add(self, obj: PhysicsObject, start_x):
         obj.pos = np.array([[float(start_x)], [float(self.pos_y)]])
@@ -246,10 +254,19 @@ class Line:
 
     def update(self, dt):
         dt_s = dt / 1000.0
-        for obj in self.objects:
-            new_pos = obj.pos.copy()
-            new_pos[0, 0] += self.speed * dt_s
-            obj.pos = new_pos
+        if (self.running):
+            for obj in self.objects:
+                new_pos = obj.pos.copy()
+                new_pos[0, 0] += self.speed * dt_s
+                obj.pos = new_pos
+
+    def toggle(self):
+        self.running = not self.running
+
+    def on(self):
+        self.running = True 
+    def off(self):
+        self.running = False
 
 
 
@@ -266,7 +283,7 @@ def main():
     screen = pygame.display.set_mode((dim, dim))
     clock = pygame.time.Clock()
     
-    gantry = Structure(3.5, 4.0, 4.0, 4.0)
+    gantry = Structure(4.0, 4.0, 4.0, 4.0)
     tape_machine = Structure(1.0, 1.0, 4.3, 4.0)
     pallet = Structure(1, 1, 5, 2.7)
 
@@ -274,8 +291,8 @@ def main():
 
 
     ee = EndEffector(4.0, 4.0, gantry)
-    line_speed = 0.1 # m/s
-    spacing_distance = 0.8 # meters between sets
+    line_speed = 0.05 # m/s
+    spacing_distance = 0.7 # meters between sets
 
     # Calculate spawn_rate in ms
     spawn_rate = (spacing_distance / line_speed) * 1000 
@@ -283,12 +300,6 @@ def main():
     # Spawner State Machine variables
     spawn_state = "SPAWN_MW"
     spawn_timer = 0
-
-
-
-
-
-
     
     
     
@@ -327,14 +338,15 @@ def main():
         elif spawn_state == "WAIT_FOR_BOX":
             if spawn_timer >= spawn_rate:
                 line.add(PhysicsObject(0.67, 0.58, 1, name="Box"), 0.0)
-                spawn_state = "WAIT_FOR_TC"
-                spawn_timer = 0
-
-        elif spawn_state == "WAIT_FOR_TC":
-            if spawn_timer >= spawn_rate:
-                line.add(PhysicsObject(0.67, 0.58, 1, name="TC"), 0.0)
+                # spawn_state = "WAIT_FOR_TC"
                 spawn_state = "WAIT_FOR_NEXT_SET"
                 spawn_timer = 0
+
+        # elif spawn_state == "WAIT_FOR_TC":
+        #     if spawn_timer >= spawn_rate:
+        #         line.add(PhysicsObject(0.67, 0.58, 1, name="TC"), 0.0)
+        #         spawn_state = "WAIT_FOR_NEXT_SET"
+        #         spawn_timer = 0
 
         elif spawn_state == "WAIT_FOR_NEXT_SET":
             if spawn_timer >= spawn_rate:
@@ -350,7 +362,8 @@ def main():
         # IMPORTANT: Logic to advance box status so ready_to_palletize actually fills up
         for b in all_boxes:
             # If box has 2 items (MW + TC) but status is still NONE, it's packed
-            if len(b.children) == 2 and b.status == "NONE":
+            # if len(b.children) == 2 and b.status == "NONE":
+            if len(b.children) == 1 and b.status == "NONE":
                 b.status = "PACKED"
             # If it's packed and hits the tape machine, it's ready
             if b.status == "PACKED" and tape_machine.contains(b.pos):
@@ -360,10 +373,10 @@ def main():
                 b.status = "READY"
 
         mws_on_belt = [o for o in line.objects if o.name == "MW" and gantry.contains(o.pos) and o.status == "NONE"]
-        tcs_on_belt = [o for o in line.objects if o.name == "TC" and gantry.contains(o.pos) and o.status == "NONE"]
+        # tcs_on_belt = [o for o in line.objects if o.name == "TC" and gantry.contains(o.pos) and o.status == "NONE"]
         
         empty_boxes = [b for b in all_boxes if len(b.children) == 0]
-        boxes_needing_tc = [b for b in all_boxes if len(b.children) == 1]
+        # boxes_needing_tc = [b for b in all_boxes if len(b.children) == 1]
         # Only palletize if it's READY and within the Gantry reach
         ready_to_palletize = [b for b in all_boxes if b.status == "READY" and gantry.contains(b.pos)]
 
@@ -375,10 +388,10 @@ def main():
             if ready_to_palletize:
                 state = "PALLET_PICK"
             
-            # SECOND PRIORITY: Complete partially filled boxes
-            elif boxes_needing_tc and tcs_on_belt:
-                current_pkg = boxes_needing_tc[0]
-                state = "TC2PKG_PICK"
+            # # SECOND PRIORITY: Complete partially filled boxes
+            # if boxes_needing_tc and tcs_on_belt:
+            #     current_pkg = boxes_needing_tc[0]
+            #     state = "TC2PKG_PICK"
             
             # THIRD PRIORITY: Start new boxes
             elif mws_on_belt:
