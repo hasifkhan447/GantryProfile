@@ -1,222 +1,81 @@
+import pandas as pd
 import numpy as np
 
-# TODO: Based on kinematics.csv, calculate this LB equation over time
+# Constants
+GRAVITY_N_PER_KG = 9.81
+# PAYLOAD_MASS_KG = 111
+PAYLOAD_MASS_KG = 200
+PAYLOAD_FORCE_N = PAYLOAD_MASS_KG * GRAVITY_N_PER_KG
+
+FIXED_LENGTH_BETWEEN_RAILS_M = 4
+FIXED_LENGTH_BETWEEN_BLOCKS_M = 0.2
+
+FIXED_FORCE_APPLICATION_Z_COORDINATE_M = 0.2
+
+# Load kinematics log
+kinematics_log = pd.read_csv('kinematics_log.csv')
+
+# Compute timestep
+kinematics_log['dt'] = kinematics_log['time'].diff().fillna(kinematics_log['time'].iloc[0])
+
+# Compute distance travelled per timestep
+kinematics_log['dL'] = kinematics_log['vy'].abs() * kinematics_log['dt']
+
+# Compute pad loads at each timestep
+kinematics_log['P1'] = (PAYLOAD_FORCE_N / 4) * (
+    1
+    + kinematics_log['y'] / (2 * FIXED_LENGTH_BETWEEN_RAILS_M)
+    + kinematics_log['ax'] * FIXED_FORCE_APPLICATION_Z_COORDINATE_M / (GRAVITY_N_PER_KG * FIXED_LENGTH_BETWEEN_RAILS_M)
+)
+
+kinematics_log['P2'] = kinematics_log['P1']
+
+kinematics_log['P3'] = (PAYLOAD_FORCE_N / 4) * (
+    1
+    - kinematics_log['y'] / (2 * FIXED_LENGTH_BETWEEN_RAILS_M)
+    - kinematics_log['ax'] * FIXED_FORCE_APPLICATION_Z_COORDINATE_M / (GRAVITY_N_PER_KG * FIXED_LENGTH_BETWEEN_RAILS_M)
+)
+
+kinematics_log['P4'] = kinematics_log['P3']
+
+# Compute cubic mean load for each pad
+L_total = kinematics_log['dL'].sum()
+
+def cubic_mean(P_col, dL_col):
+    return np.cbrt((P_col**3 * dL_col).sum() / L_total)
+
+P1_MEAN = cubic_mean(kinematics_log['P1'], kinematics_log['dL'])
+P2_MEAN = cubic_mean(kinematics_log['P2'], kinematics_log['dL'])
+P3_MEAN = cubic_mean(kinematics_log['P3'], kinematics_log['dL'])
+P4_MEAN = cubic_mean(kinematics_log['P4'], kinematics_log['dL'])
+
+# Maximum mean load across all pads
+P_AVERAGE_MAX = max(P1_MEAN, P2_MEAN, P3_MEAN, P4_MEAN)
+
+# Basic dynamic load rating (N) - to be filled in
+C = 6.37e3  # TODO: fill in from bearing datasheet
+
+# Nominal life (km)
+L_NOMINAL_KM = (C / P_AVERAGE_MAX)**3 * 50
+
+
+WORKDAYS_PER_YEAR = 220
+HOURS_PER_DAY = 8
+TAKT_TIME_SEC_PER_UNIT = 30
+UNITS_PER_HOUR = 3600 / TAKT_TIME_SEC_PER_UNIT
+CYCLES_PER_DAY = HOURS_PER_DAY * UNITS_PER_HOUR
+TRAVEL_PER_CYCLE_M = 20
+TRAVEL_PER_DAY_M = CYCLES_PER_DAY * TRAVEL_PER_CYCLE_M
+TRAVEL_PER_YEAR_M = TRAVEL_PER_DAY_M * WORKDAYS_PER_YEAR
+
+YEARS_LIFE = (L_NOMINAL_KM * 1000) / TRAVEL_PER_YEAR_M
 
 
 
-# ==============================
-# INPUT PARAMETERS
-# ==============================
-
-# Masses
-m1 = 300      # kg (moving mass)
-m2 = 50      # kg (payload)
-
-# Gravity
-g = 9.81
-
-# Acceleration
-a1 = 3.2
-a3 = 3.2
-
-# Geometry (mm)
-l0 = 500
-l1 = 4000
-l2 = 500
-l3 = 500
-l4 = 50
-l5 = 100
-
-# Stroke segments (mm)
-S1 = 100
-S2 = 2800
-S3 = 100
-
-ls = S1 + S2 + S3
-cycle_length = 2 * ls
-
-# LM Guide ratings
-C = 11380       # N (dynamic load rating)
-C0 = 16970      # N (static load rating)
-
-# Load factor
-fw = 1.5
-alpha = 1/fw
-
-
-
-# ==============================
-# HELPER FUNCTIONS
-# ==============================
-
-def cube_mean(values, distances):
-    """Calculate cubic mean load."""
-    total = sum((p**3) * s for p, s in zip(values, distances))
-    return (total / cycle_length) ** (1/3)
-
-
-def positive(x):
-    """THK groove rule"""
-    return max(x, 0)
-
-
-# ==============================
-# STEP 1 — RADIAL LOAD (uniform motion)
-# ==============================
-
-P1 = (m1*g)/4 - (m1*g*l2)/(2*l0) + (m1*g*l5)/(2*l1) + (m2*g)/4
-P2 = (m1*g)/4 + (m1*g*l2)/(2*l0) + (m1*g*l5)/(2*l1) + (m2*g)/4
-P3 = (m1*g)/4 + (m1*g*l2)/(2*l0) - (m1*g*l5)/(2*l1) + (m2*g)/4
-P4 = (m1*g)/4 - (m1*g*l2)/(2*l0) - (m1*g*l5)/(2*l1) + (m2*g)/4
-
-print("Uniform radial loads:")
-print(P1, P2, P3, P4)
-
-
-# ==============================
-# STEP 2 — ACCELERATION TERMS
-# ==============================
-
-radial_acc = (m1*a1*l5)/(2*l0) + (m2*a1*l4)/(2*l0)
-lateral_acc = (m1*a1*l3)/(2*l0)
-
-
-# ==============================
-# STEP 3 — LEFTWARD ACCELERATION
-# ==============================
-
-Pla = [
-    P1 - radial_acc,
-    P2 + radial_acc,
-    P3 + radial_acc,
-    P4 - radial_acc
-]
-
-Ptla = [
-    -lateral_acc,
-    lateral_acc,
-    lateral_acc,
-    -lateral_acc
-]
-
-
-# ==============================
-# STEP 4 — LEFTWARD DECELERATION
-# ==============================
-
-Pld = [
-    P1 + radial_acc,
-    P2 - radial_acc,
-    P3 - radial_acc,
-    P4 + radial_acc
-]
-
-Ptld = [
-    lateral_acc,
-    -lateral_acc,
-    -lateral_acc,
-    lateral_acc
-]
-
-
-# ==============================
-# STEP 5 — RIGHTWARD ACCELERATION
-# ==============================
-
-Pra = [
-    P1 + radial_acc,
-    P2 - radial_acc,
-    P3 - radial_acc,
-    P4 + radial_acc
-]
-
-Ptra = [
-    lateral_acc,
-    -lateral_acc,
-    -lateral_acc,
-    lateral_acc
-]
-
-
-# ==============================
-# STEP 6 — RIGHTWARD DECELERATION
-# ==============================
-
-Prd = [
-    P1 - radial_acc,
-    P2 + radial_acc,
-    P3 + radial_acc,
-    P4 - radial_acc
-]
-
-Ptrd = [
-    -lateral_acc,
-    lateral_acc,
-    lateral_acc,
-    -lateral_acc
-]
-
-
-# ==============================
-# STEP 7 — COMBINED LOADS
-# ==============================
-
-def combined(P, Pt):
-    return [positive(p) + positive(pt) for p, pt in zip(P, Pt)]
-
-Pe_la = combined(Pla, Ptla)
-Pe_ld = combined(Pld, Ptld)
-Pe_ra = combined(Pra, Ptra)
-Pe_rd = combined(Prd, Ptrd)
-
-Pe_uniform = [positive(P1), positive(P2), positive(P3), positive(P4)]
-
-
-# ==============================
-# STEP 8 — AVERAGE LOADS
-# ==============================
-
-Pm = []
-
-for i in range(4):
-
-    loads = [
-        Pe_la[i], Pe_uniform[i], Pe_ld[i],
-        Pe_ra[i], Pe_uniform[i], Pe_rd[i]
-    ]
-
-    distances = [S1, S2, S3, S1, S2, S3]
-
-    Pm.append(cube_mean(loads, distances))
-
-
-print("\nAverage loads Pm:")
-for i, p in enumerate(Pm):
-    print(f"Block {i+1}: {p:.2f} N")
-
-
-# ==============================
-# STEP 9 — NOMINAL LIFE
-# ==============================
-
-L10 = []
-
-for p in Pm:
-    life = alpha * 50 * (C/p)**3
-    L10.append(life)
-
-print("\nNominal life (km):")
-for i, life in enumerate(L10):
-    print(f"Block {i+1}: {life:.0f} km")
-
-
-# ==============================
-# STEP 10 — SYSTEM LIFE
-# ==============================
-
-system_life = min(L10)
-critical_block = np.argmin(L10) + 1
-
-print("\nSystem Life:")
-print(f"Critical block: {critical_block}")
-print(f"Life: {system_life:.0f} km")
+print(f"P1_MEAN: {P1_MEAN:.2f} N")
+print(f"P2_MEAN: {P2_MEAN:.2f} N")
+print(f"P3_MEAN: {P3_MEAN:.2f} N")
+print(f"P4_MEAN: {P4_MEAN:.2f} N")
+print(f"P_AVERAGE_MAX: {P_AVERAGE_MAX:.2f} N")
+print(f"L_NOMINAL_KM: {L_NOMINAL_KM:.2f} km")
+print(f"YEARS_LIFE: {YEARS_LIFE:.2f}")

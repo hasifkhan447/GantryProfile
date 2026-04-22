@@ -466,13 +466,6 @@ def main():
                 state = "IDLE"
 
 
-
-
-
-
-
-
-
         # Logic & Physics
         ee.update(sim_dt, target)
         line.update(sim_dt)
@@ -492,7 +485,7 @@ def main():
         screen.blit(img, (20, 20))
         pygame.display.flip()
 
-        logger.log(ee.pos, real_dt) # Important that this is real_dt
+        logger.log(ee.pos - gantry.pos, real_dt) # Important that this is real_dt
 
 if __name__ == "__main__":
     main()
