@@ -492,7 +492,7 @@ def main():
         screen.blit(img, (20, 20))
         pygame.display.flip()
 
-        logger.log(ee.pos, sim_dt)
+        logger.log(ee.pos, real_dt) # Important that this is real_dt
 
 if __name__ == "__main__":
     main()
