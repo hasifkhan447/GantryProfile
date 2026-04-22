@@ -137,14 +137,23 @@ class PhysicsObject(Obj):
         self.name = name
 
     def draw(self, screen):
-        w, h = m2px(self.size_real[0,0]), m2px(self.size_real[1,0])
-        x, y = m2px(self.x) - w//2, m2px(self.y) - h//2
-        pygame.draw.rect(screen, (60, 60, 80), (x, y, w, h))
-        label = pygame.font.SysFont(None, 16).render(self.name, True, (200, 200, 200))
-        screen.blit(label, (x + 2, y + h//2 - 8))
 
         for child in self.children:
             child.draw(screen)
+
+        w, h = m2px(self.size_real[0,0]), m2px(self.size_real[1,0])
+        x, y = m2px(self.x) - w//2, m2px(self.y) - h//2
+        pygame.draw.rect(screen, (60, 60, 80), (x, y, w, h))
+
+        label = pygame.font.SysFont(None, 16).render(self.name, True, (200, 200, 200))
+
+        screen.blit(label, (x + 2, y + h//2 - 8))
+
+        second_label = pygame.font.SysFont(None, 16).render(self.status, True, (200, 200, 200))
+
+        screen.blit(second_label, (x+2, y + h//2+4))
+
+
 
 class EndEffector(Obj):
     def __init__(self, pos_x, pos_y, bound_structure: Structure):
@@ -158,7 +167,7 @@ class EndEffector(Obj):
         
         # S-Curve Constraints
         self.max_v = 0.5   # m/s (Your requested clamp)
-        self.max_a = 3   # m/s^2
+        self.max_a = 4   # m/s^2
         self.gain_p = 20.0 # How aggressively to snap to target
 
     def update(self, dt: int, target_vec: np.ndarray):
@@ -261,21 +270,20 @@ class Line:
         for obj in self.objects: obj.draw(screen)
 
 def main():
-
     pygame.init()
     screen = pygame.display.set_mode((dim, dim))
     clock = pygame.time.Clock()
     
-    gantry = Structure(3.5, 4.0, 4.0, 4.0)
-    tape_machine = Structure(1.0, 1.0, 4.3, 4.0)
+    gantry = Structure(4.0, 4.0, 4.0, 4.0)
+    tape_machine = Structure(1.0, 1.0, 4.0, 4.0)
     pallet = Structure(1, 1, 5, 2.7)
 
 
 
 
     ee = EndEffector(4.0, 4.0, gantry)
-    line_speed = 0.1 # m/s
-    spacing_distance = 0.8 # meters between sets
+    line_speed = 0.05 # m/s
+    spacing_distance = 0.9 # meters between sets
 
     # Calculate spawn_rate in ms
     spawn_rate = (spacing_distance / line_speed) * 1000 
@@ -283,13 +291,6 @@ def main():
     # Spawner State Machine variables
     spawn_state = "SPAWN_MW"
     spawn_timer = 0
-
-
-
-
-
-
-    
     
     
     line = Line(pos_y=4.0, height=1.0, speed=line_speed)
@@ -303,10 +304,16 @@ def main():
 
     current_mw: Optional[PhysicsObject] = None
     current_tc: Optional[PhysicsObject] = None 
-    current_pk: Optional[PhysicsObject] = None 
 
     logger = KinematicsLogger()
-    time_scale = 10.0  # 2.0 = 2x speed, 5.0 = 5x speed, etc.
+    time_scale = 5.0  # 2.0 = 2x speed, 5.0 = 5x speed, etc.
+
+
+    USE_TC = True  # Set to False to skip Thermocol entirely
+
+
+
+
     while running:
         real_dt = clock.tick(60)
         sim_dt  = time_scale*real_dt
@@ -324,10 +331,14 @@ def main():
                     spawn_state = "WAIT_FOR_BOX"
                     spawn_timer = 0
 
+
         elif spawn_state == "WAIT_FOR_BOX":
             if spawn_timer >= spawn_rate:
                 line.add(PhysicsObject(0.67, 0.58, 1, name="Box"), 0.0)
-                spawn_state = "WAIT_FOR_TC"
+                if USE_TC:
+                    spawn_state = "WAIT_FOR_TC"
+                else:
+                    spawn_state = "WAIT_FOR_NEXT_SET"
                 spawn_timer = 0
 
         elif spawn_state == "WAIT_FOR_TC":
@@ -341,16 +352,21 @@ def main():
                 spawn_state = "SPAWN_MW"
                 spawn_timer = 0
 
+
+
+
+
+
         # Current Target defaults to EE current pos if no state is active
         target = ee.pos.copy()
 
-# --- 1. PRE-LOGIC: TARGETING FILTERS ---
+        # --- 1. PRE-LOGIC: TARGETING FILTERS ---
         all_boxes = [o for o in line.objects if o.name == "Box" and gantry.contains(o.pos)]
-        
-        # IMPORTANT: Logic to advance box status so ready_to_palletize actually fills up
+        required_count = 1 if USE_TC else 0 # Need to see why this is not working
+
         for b in all_boxes:
-            # If box has 2 items (MW + TC) but status is still NONE, it's packed
-            if len(b.children) == 2 and b.status == "NONE":
+            # Box is packed if it reaches the required count
+            if len(b.children) >= required_count and b.status == "NONE":
                 b.status = "PACKED"
             # If it's packed and hits the tape machine, it's ready
             if b.status == "PACKED" and tape_machine.contains(b.pos):
@@ -359,12 +375,23 @@ def main():
             if b.status == "TAPING" and not tape_machine.contains(b.pos):
                 b.status = "READY"
 
-        mws_on_belt = [o for o in line.objects if o.name == "MW" and gantry.contains(o.pos) and o.status == "NONE"]
-        tcs_on_belt = [o for o in line.objects if o.name == "TC" and gantry.contains(o.pos) and o.status == "NONE"]
+            print(len(b.children))
+
+
+
         
+        # For MW2PKG
         empty_boxes = [b for b in all_boxes if len(b.children) == 0]
+        mws_on_belt = [o for o in line.objects if o.name == "MW" and gantry.contains(o.pos) and o.status == "NONE"]
+
+
+
+        # For TC2PKG
+        tcs_on_belt = [o for o in line.objects if o.name == "TC" and gantry.contains(o.pos) and o.status == "NONE"]
         boxes_needing_tc = [b for b in all_boxes if len(b.children) == 1]
-        # Only palletize if it's READY and within the Gantry reach
+
+
+        # For palletize
         ready_to_palletize = [b for b in all_boxes if b.status == "READY" and gantry.contains(b.pos)]
 
         # --- 2. THE STATE MACHINE ---
@@ -375,14 +402,14 @@ def main():
             if ready_to_palletize:
                 state = "PALLET_PICK"
             
-            # SECOND PRIORITY: Complete partially filled boxes
-            elif boxes_needing_tc and tcs_on_belt:
+            elif USE_TC and boxes_needing_tc and tcs_on_belt:
                 current_pkg = boxes_needing_tc[0]
                 state = "TC2PKG_PICK"
             
             # THIRD PRIORITY: Start new boxes
             elif mws_on_belt:
                 state = "MW2PKG_PICK"
+
 
         # --- PALLET SEQUENCE (TOP PRIORITY) ---
         elif state == "PALLET_PICK":
