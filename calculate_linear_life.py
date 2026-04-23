@@ -22,18 +22,18 @@ kinematics_log['dt'] = kinematics_log['time'].diff().fillna(kinematics_log['time
 kinematics_log['dL'] = kinematics_log['vy'].abs() * kinematics_log['dt']
 
 # Compute pad loads at each timestep
-kinematics_log['P1'] = (PAYLOAD_FORCE_N / 4) * (
+kinematics_log['P1'] = (PAYLOAD_FORCE_N/4 ) * (
     1
-    + kinematics_log['y'] / (2 * FIXED_LENGTH_BETWEEN_RAILS_M)
-    + kinematics_log['ax'] * FIXED_FORCE_APPLICATION_Z_COORDINATE_M / (GRAVITY_N_PER_KG * FIXED_LENGTH_BETWEEN_RAILS_M)
+    + 2 * kinematics_log['y'] / (FIXED_LENGTH_BETWEEN_RAILS_M)
+    + 2*kinematics_log['ax'] * FIXED_FORCE_APPLICATION_Z_COORDINATE_M / (GRAVITY_N_PER_KG * FIXED_LENGTH_BETWEEN_RAILS_M)
 )
 
 kinematics_log['P2'] = kinematics_log['P1']
 
-kinematics_log['P3'] = (PAYLOAD_FORCE_N / 4) * (
+kinematics_log['P3'] = (PAYLOAD_FORCE_N /4) * (
     1
-    - kinematics_log['y'] / (2 * FIXED_LENGTH_BETWEEN_RAILS_M)
-    - kinematics_log['ax'] * FIXED_FORCE_APPLICATION_Z_COORDINATE_M / (GRAVITY_N_PER_KG * FIXED_LENGTH_BETWEEN_RAILS_M)
+    - 2*kinematics_log['y'] / (FIXED_LENGTH_BETWEEN_RAILS_M)
+    - 2*kinematics_log['ax'] * FIXED_FORCE_APPLICATION_Z_COORDINATE_M / (GRAVITY_N_PER_KG * FIXED_LENGTH_BETWEEN_RAILS_M)
 )
 
 kinematics_log['P4'] = kinematics_log['P3']
